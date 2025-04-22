@@ -2,10 +2,22 @@
 #include "Net/UnrealNetwork.h"
 #include "GameplayEffect.h"
 #include "GameplayEffectExtension.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemBlueprintLibrary.h"
 
 UWoWAttributeSet::UWoWAttributeSet()
 {
-    // Initialize primary attributes
+    // Initialize conversion ratios
+    HealthPerStamina = 10.0f;
+    ManaPerIntellect = 15.0f;
+    ArmorPerAgility = 2.0f;
+    CritPerAgility = 0.05f;
+    ManaRegenPerSpirit = 0.5f;
+    BaseHealth = 50.0f;
+    BaseMana = 50.0f;
+    
+    // Initialize primary attributes with default values
+    // These will be overridden by GameplayEffects
     Strength.SetBaseValue(10.0f);
     Agility.SetBaseValue(10.0f);
     Intellect.SetBaseValue(10.0f);
@@ -19,13 +31,14 @@ UWoWAttributeSet::UWoWAttributeSet()
     MasteryRating.SetBaseValue(0.0f);
     VersatilityRating.SetBaseValue(0.0f);
     
-    // Initialize vital attributes
-    Health.SetBaseValue(100.0f);
-    MaxHealth.SetBaseValue(100.0f);
-    HealthRegenRate.SetBaseValue(1.0f);
-    Mana.SetBaseValue(100.0f);
-    MaxMana.SetBaseValue(100.0f);
-    ManaRegenRate.SetBaseValue(2.0f);
+    // Initialize vital attributes - will be calculated in UpdateDerivedAttributes
+    // We set temporary values to avoid issues in the UI
+    Health.SetBaseValue(1.0f);
+    MaxHealth.SetBaseValue(1.0f);
+    HealthRegenRate.SetBaseValue(0.0f);
+    Mana.SetBaseValue(1.0f);
+    MaxMana.SetBaseValue(1.0f);
+    ManaRegenRate.SetBaseValue(0.0f);
 }
 
 void UWoWAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -55,6 +68,55 @@ void UWoWAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
     DOREPLIFETIME(UWoWAttributeSet, ManaRegenRate);
 }
 
+void UWoWAttributeSet::UpdateDerivedAttributes(UAbilitySystemComponent* AbilityComp)
+{
+    if (!AbilityComp || !AbilityComp->IsOwnerActorAuthoritative())
+    {
+        // Only the server should modify attributes directly
+        return;
+    }
+
+    // Store current values and percentages
+    float CurrentHealthPct = (GetMaxHealth() > 0.0f) ? (GetHealth() / GetMaxHealth()) : 1.0f;
+    float CurrentManaPct = (GetMaxMana() > 0.0f) ? (GetMana() / GetMaxMana()) : 1.0f;
+    
+    // Calculate new max values
+    float NewMaxHealth = BaseHealth + (GetStamina() * HealthPerStamina);
+    float NewMaxMana = BaseMana + (GetIntellect() * ManaPerIntellect);
+    
+    // Calculate regeneration rates
+    float NewHealthRegenRate = 0.5f + (GetSpirit() * 0.1f);
+    float NewManaRegenRate = 1.0f + (GetSpirit() * ManaRegenPerSpirit);
+    
+    // Calculate armor and crit from agility
+    float NewArmor = GetAgility() * ArmorPerAgility;
+    float NewCritChance = 5.0f + (GetAgility() * CritPerAgility);
+    
+    // Use the AbilitySystemComponent to apply these changes
+    // This ensures proper replication
+    AbilityComp->SetNumericAttributeBase(GetMaxHealthAttribute(), NewMaxHealth);
+    AbilityComp->SetNumericAttributeBase(GetHealthRegenRateAttribute(), NewHealthRegenRate);
+    AbilityComp->SetNumericAttributeBase(GetMaxManaAttribute(), NewMaxMana);
+    AbilityComp->SetNumericAttributeBase(GetManaRegenRateAttribute(), NewManaRegenRate);
+    AbilityComp->SetNumericAttributeBase(GetArmorAttribute(), NewArmor);
+    AbilityComp->SetNumericAttributeBase(GetCriticalStrikeChanceAttribute(), NewCritChance);
+    
+    // Calculate new current health/mana while maintaining percentage
+    float NewHealth = CurrentHealthPct * NewMaxHealth;
+    float NewMana = CurrentManaPct * NewMaxMana;
+    
+    // Only set health/mana if significantly different (prevents minor floating point issues)
+    if (!FMath::IsNearlyEqual(GetHealth(), NewHealth, 0.1f))
+    {
+        AbilityComp->SetNumericAttributeBase(GetHealthAttribute(), NewHealth);
+    }
+    
+    if (!FMath::IsNearlyEqual(GetMana(), NewMana, 0.1f))
+    {
+        AbilityComp->SetNumericAttributeBase(GetManaAttribute(), NewMana);
+    }
+}
+
 void UWoWAttributeSet::OnRep_Health(const FGameplayAttributeData& OldHealth)
 {
     GAMEPLAYATTRIBUTE_REPNOTIFY(UWoWAttributeSet, Health, OldHealth);
@@ -69,25 +131,13 @@ void UWoWAttributeSet::PreAttributeChange(const FGameplayAttribute& Attribute, f
 {
     Super::PreAttributeChange(Attribute, NewValue);
     
-    UE_LOG(LogTemp, Warning, TEXT("PreAttributeChange: Attribute=%s, NewValue=%f"), 
-        *Attribute.GetName(), NewValue);
-    
     // Clamp health and mana between 0 and their max values
     if (Attribute == GetHealthAttribute())
     {
         // Only clamp if MaxHealth is greater than 0
-        // This prevents the initialization issue
         if (GetMaxHealth() > 0.0f)
         {
             NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxHealth());
-            UE_LOG(LogTemp, Warning, TEXT("Clamped Health to: %f (Max: %f)"), 
-                NewValue, GetMaxHealth());
-        }
-        else
-        {
-            // Don't clamp during initialization when MaxHealth might not be set yet
-            UE_LOG(LogTemp, Warning, TEXT("Skipped clamping Health: %f (Max not set yet)"), 
-                NewValue);
         }
     }
     else if (Attribute == GetManaAttribute())
@@ -116,34 +166,13 @@ void UWoWAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallbac
         TargetPawn = Cast<APawn>(TargetActor);
     }
     
-    // Get the Source actor
-    AActor* SourceActor = nullptr;
-    AController* SourceController = nullptr;
-    APawn* SourcePawn = nullptr;
-    
-    if (Data.EffectSpec.GetContext().GetSourceObject())
-    {
-        SourceActor = Cast<AActor>(Data.EffectSpec.GetContext().GetSourceObject());
-        
-        if (SourceActor)
-        {
-            SourceController = Cast<AController>(SourceActor);
-            if (!SourceController && SourceActor->GetInstigatorController())
-            {
-                SourceController = SourceActor->GetInstigatorController();
-            }
-            
-            if (!SourceController && SourceActor->GetOwner())
-            {
-                SourceController = Cast<AController>(SourceActor->GetOwner());
-            }
-            
-            if (SourceController)
-            {
-                SourcePawn = SourceController->GetPawn();
-            }
-        }
-    }
+    // Check if a primary attribute was modified
+    bool bPrimaryAttributeChanged = 
+        Data.EvaluatedData.Attribute == GetStrengthAttribute() ||
+        Data.EvaluatedData.Attribute == GetAgilityAttribute() ||
+        Data.EvaluatedData.Attribute == GetIntellectAttribute() ||
+        Data.EvaluatedData.Attribute == GetStaminaAttribute() ||
+        Data.EvaluatedData.Attribute == GetSpiritAttribute();
     
     // Handle changes to different attributes
     if (Data.EvaluatedData.Attribute == GetHealthAttribute())
@@ -168,7 +197,24 @@ void UWoWAttributeSet::PostGameplayEffectExecute(const FGameplayEffectModCallbac
         // Handle max mana change
         AdjustAttributeForMaxChange(Mana, MaxMana, GetMaxMana(), GetManaAttribute());
     }
-    // You can add handlers for other attributes as needed
+    
+    // If a primary attribute changed, update derived attributes
+    if (bPrimaryAttributeChanged)
+    {
+        // CHANGE THIS LINE - use the correct way to get the ASC
+        UAbilitySystemComponent* ASC = Data.EffectSpec.GetContext().GetInstigatorAbilitySystemComponent();
+        if (!ASC)
+        {
+            // Try alternate method if the first one failed
+            ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(TargetActor);
+        }
+        
+        if (ASC)
+        {
+            // Update the derived attributes
+            UpdateDerivedAttributes(ASC);
+        }
+    }
 }
 
 void UWoWAttributeSet::AdjustAttributeForMaxChange(FGameplayAttributeData& AffectedAttribute, const FGameplayAttributeData& MaxAttribute, float NewMaxValue, const FGameplayAttribute& AffectedAttributeProperty)
@@ -180,7 +226,6 @@ void UWoWAttributeSet::AdjustAttributeForMaxChange(FGameplayAttributeData& Affec
     if (!FMath::IsNearlyEqual(CurrentMax, NewMaxValue) && CurrentMax > 0.0f)
     {
         // Calculate new value based on percentage of max
-        // IMPORTANT CHANGE: If current value is 0, set to full health
         float ValuePercentage = (CurrentValue > 0.0f) ? (CurrentValue / CurrentMax) : 1.0f;
         float NewValue = NewMaxValue * ValuePercentage;
         

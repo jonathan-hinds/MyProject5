@@ -87,6 +87,28 @@ public:
     FGameplayAttributeData ManaRegenRate;
     ATTRIBUTE_ACCESSORS(UWoWAttributeSet, ManaRegenRate)
 
+    // Stat conversion config (could be read from data table in production)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config")
+    float HealthPerStamina;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config")
+    float ManaPerIntellect;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config")
+    float ArmorPerAgility;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config") 
+    float CritPerAgility;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config")
+    float ManaRegenPerSpirit;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config")
+    float BaseHealth;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attributes|Config")
+    float BaseMana;
+
     // OnRep functions for replicated attributes
     UFUNCTION()
     virtual void OnRep_Health(const FGameplayAttributeData& OldHealth);
@@ -102,7 +124,10 @@ public:
 
     // Initialize attributes to their default values
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
+    
+    // Recalculate derived attributes when base stats change
+// Recalculate derived attributes when base stats change
+void UpdateDerivedAttributes(UAbilitySystemComponent* AbilityComp);
 protected:
     // Helper function to clamp attributes
     void AdjustAttributeForMaxChange(FGameplayAttributeData& AffectedAttribute, const FGameplayAttributeData& MaxAttribute, float NewMaxValue, const FGameplayAttribute& AffectedAttributeProperty);

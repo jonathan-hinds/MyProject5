@@ -70,12 +70,18 @@ void AWoWCharacterBase::InitializeAttributes()
         
         if (SpecHandle.IsValid())
         {
-            // Apply the effect
+            // Apply the effect that sets base primary attributes
             FActiveGameplayEffectHandle ActiveGEHandle = ASC->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
+            
+            // Now that primary attributes are set, calculate derived attributes
+            UWoWAttributeSet* WoWAS = Cast<UWoWAttributeSet>(GetAttributeSet());
+            if (WoWAS)
+            {
+                WoWAS->UpdateDerivedAttributes(ASC);
+            }
         }
     }
 }
-
 void AWoWCharacterBase::GiveAbilities()
 {
     UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
