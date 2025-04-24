@@ -14,6 +14,14 @@ AWoWEnemyCharacter::AWoWEnemyCharacter()
     // Create pawn sensing component
     PawnSensingComponent = CreateDefaultSubobject<UPawnSensingComponent>(TEXT("PawnSensingComponent"));
     
+    // Create ability system component
+    AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+    AbilitySystemComponent->SetIsReplicated(true);
+    AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
+
+    // Create the attribute set
+    AttributeSet = CreateDefaultSubobject<UWoWAttributeSet>(TEXT("AttributeSet"));
+    
     // Create a static mesh component for the enemy's visual representation
     UStaticMeshComponent* MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
     MeshComponent->SetupAttachment(RootComponent);
@@ -38,6 +46,17 @@ void AWoWEnemyCharacter::BeginPlay()
 {
     Super::BeginPlay();
     
+    // Initialize the ability system component
+    if (AbilitySystemComponent)
+    {
+        AbilitySystemComponent->InitAbilityActorInfo(this, this);
+        UE_LOG(LogTemp, Warning, TEXT("Enemy %s initialized ASC"), *GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Enemy %s has no ASC!"), *GetName());
+    }
+    
     // Setup pawn sensing
     if (PawnSensingComponent)
     {
@@ -50,35 +69,67 @@ void AWoWEnemyCharacter::BeginPlay()
     InitializeEnemy();
 }
 
+UAbilitySystemComponent* AWoWEnemyCharacter::GetAbilitySystemComponent() const
+{
+    return AbilitySystemComponent;
+}
+
+UWoWAttributeSet* AWoWEnemyCharacter::GetAttributeSet() const
+{
+    return AttributeSet;
+}
+
 void AWoWEnemyCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
+    
+    // Initialize the ability system for this enemy
+    if (AbilitySystemComponent)
+    {
+        // Make sure the ability system knows its owner/avatar
+        AbilitySystemComponent->InitAbilityActorInfo(this, this);
+        
+        // Refresh any gameplay cues
+        AbilitySystemComponent->ForceReplication();
+        
+        UE_LOG(LogTemp, Warning, TEXT("Enemy %s PossessedBy - ASC initialized"), *GetName());
+    }
 }
 
 void AWoWEnemyCharacter::InitializeEnemy()
 {
     // Apply the default attribute effect, which will set primary stats
-    if (DefaultAttributeEffect && GetAbilitySystemComponent())
+    if (DefaultAttributeEffect && AbilitySystemComponent)
     {
-        // Apply enemy-type-based scaling to the primary attributes
-        UWoWAttributeSet* AttributeSet = GetAttributeSet();
-        if (AttributeSet)
+        UE_LOG(LogTemp, Warning, TEXT("Enemy %s initializing attributes"), *GetName());
+        
+        // Apply level scaling (roughly 10% increase per level)
+        float LevelScaling = 1.0f + ((Level - 1) * 0.1f);
+        
+        // Apply the effect to set initial attribute values
+        FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
+        EffectContext.AddSourceObject(this);
+        
+        FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(DefaultAttributeEffect, Level, EffectContext);
+        
+        if (SpecHandle.IsValid())
         {
-            // Apply level scaling (roughly 10% increase per level)
-            float LevelScaling = 1.0f + ((Level - 1) * 0.1f);
+            // Apply the initial attributes
+            FActiveGameplayEffectHandle ActiveGEHandle = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
             
-            // Apply the effect to set initial attribute values
-            FGameplayEffectContextHandle EffectContext = GetAbilitySystemComponent()->MakeEffectContext();
-            EffectContext.AddSourceObject(this);
-            
-            FGameplayEffectSpecHandle SpecHandle = GetAbilitySystemComponent()->MakeOutgoingSpec(DefaultAttributeEffect, Level, EffectContext);
-            
-            if (SpecHandle.IsValid())
+            if (ActiveGEHandle.IsValid())
             {
-                // Apply the initial attributes
-                GetAbilitySystemComponent()->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-                
-                // Now fine-tune attributes based on enemy type
+                UE_LOG(LogTemp, Warning, TEXT("Applied attribute effect to enemy %s"), *GetName());
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to apply attribute effect to enemy %s"), *GetName());
+            }
+            
+            // Now fine-tune attributes based on enemy type
+            UWoWAttributeSet* WoWAS = Cast<UWoWAttributeSet>(AttributeSet);
+            if (WoWAS)
+            {
                 float StrengthMod = 1.0f;
                 float AgilityMod = 1.0f;
                 float IntellectMod = 1.0f;
@@ -104,27 +155,51 @@ void AWoWEnemyCharacter::InitializeEnemy()
                 }
                 
                 // Apply the type-specific and level-scaled modifiers
-                float CurrentStrength = AttributeSet->GetStrength();
-                float CurrentAgility = AttributeSet->GetAgility();
-                float CurrentIntellect = AttributeSet->GetIntellect();
-                float CurrentStamina = AttributeSet->GetStamina();
-                float CurrentSpirit = AttributeSet->GetSpirit();
+                float CurrentStrength = WoWAS->GetStrength();
+                float CurrentAgility = WoWAS->GetAgility();
+                float CurrentIntellect = WoWAS->GetIntellect();
+                float CurrentStamina = WoWAS->GetStamina();
+                float CurrentSpirit = WoWAS->GetSpirit();
                 
                 // Apply modifiers
-                AttributeSet->SetStrength(CurrentStrength * StrengthMod * LevelScaling);
-                AttributeSet->SetAgility(CurrentAgility * AgilityMod * LevelScaling);
-                AttributeSet->SetIntellect(CurrentIntellect * IntellectMod * LevelScaling);
-                AttributeSet->SetStamina(CurrentStamina * StaminaMod * LevelScaling);
-                AttributeSet->SetSpirit(CurrentSpirit * SpiritMod * LevelScaling);
+                WoWAS->SetStrength(CurrentStrength * StrengthMod * LevelScaling);
+                WoWAS->SetAgility(CurrentAgility * AgilityMod * LevelScaling);
+                WoWAS->SetIntellect(CurrentIntellect * IntellectMod * LevelScaling);
+                WoWAS->SetStamina(CurrentStamina * StaminaMod * LevelScaling);
+                WoWAS->SetSpirit(CurrentSpirit * SpiritMod * LevelScaling);
                 
                 // Update derived attributes (health, mana, etc.)
-                AttributeSet->UpdateDerivedAttributes(GetAbilitySystemComponent());
+                WoWAS->UpdateDerivedAttributes(AbilitySystemComponent);
+                
+                UE_LOG(LogTemp, Warning, TEXT("Enemy %s stats: STR=%.1f, AGI=%.1f, INT=%.1f, STA=%.1f, SPI=%.1f"), 
+                       *GetName(), WoWAS->GetStrength(), WoWAS->GetAgility(), WoWAS->GetIntellect(), 
+                       WoWAS->GetStamina(), WoWAS->GetSpirit());
+                
+                UE_LOG(LogTemp, Warning, TEXT("Enemy %s vitals: Health=%.1f/%.1f, Mana=%.1f/%.1f"), 
+                       *GetName(), WoWAS->GetHealth(), WoWAS->GetMaxHealth(), 
+                       WoWAS->GetMana(), WoWAS->GetMaxMana());
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Enemy %s has no WoWAttributeSet!"), *GetName());
             }
         }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to create effect spec for enemy %s attributes"), *GetName());
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Enemy %s missing DefaultAttributeEffect or AbilitySystemComponent"), *GetName());
     }
     
     // Give the enemy its abilities
-    GiveAbilities();
+    if (AbilitySystemComponent)
+    {
+        GiveAbilities();
+        UE_LOG(LogTemp, Warning, TEXT("Gave abilities to enemy %s"), *GetName());
+    }
 }
 
 UBehaviorTree* AWoWEnemyCharacter::GetBehaviorTree() const
@@ -135,8 +210,8 @@ UBehaviorTree* AWoWEnemyCharacter::GetBehaviorTree() const
 float AWoWEnemyCharacter::CalculateAttackPower() const
 {
     // Get the attribute set
-    UWoWAttributeSet* AttributeSet = GetAttributeSet();
-    if (!AttributeSet)
+    UWoWAttributeSet* WoWAS = Cast<UWoWAttributeSet>(AttributeSet);
+    if (!WoWAS)
     {
         return 0.0f;
     }
@@ -148,17 +223,17 @@ float AWoWEnemyCharacter::CalculateAttackPower() const
     {
         case EEnemyType::Melee:
             // Melee AP formula: Strength * 2 + Level
-            AttackPower = AttributeSet->GetStrength() * 2.0f + Level;
+            AttackPower = WoWAS->GetStrength() * 2.0f + Level;
             break;
             
         case EEnemyType::Ranged:
             // Ranged AP formula: Agility * 2 + Level
-            AttackPower = AttributeSet->GetAgility() * 2.0f + Level;
+            AttackPower = WoWAS->GetAgility() * 2.0f + Level;
             break;
             
         case EEnemyType::Caster:
             // Caster AP formula: Intellect * 2 + Level
-            AttackPower = AttributeSet->GetIntellect() * 2.0f + Level;
+            AttackPower = WoWAS->GetIntellect() * 2.0f + Level;
             break;
     }
     
@@ -185,6 +260,8 @@ void AWoWEnemyCharacter::OnPawnSeen(APawn* SeenPawn)
     // If the seen pawn is a player, alert the AI controller
     if (SeenPawn && SeenPawn->IsPlayerControlled())
     {
+        UE_LOG(LogTemp, Warning, TEXT("Enemy %s saw player %s"), *GetName(), *SeenPawn->GetName());
+        
         AWoWEnemyController* EnemyController = Cast<AWoWEnemyController>(GetController());
         if (EnemyController)
         {

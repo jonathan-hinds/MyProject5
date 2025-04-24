@@ -5,6 +5,10 @@
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "../Character/WoWEnemyCharacter.h"
+#include "../Character/WoWPlayerCharacter.h"
+#include "../States/WoWPlayerState.h"
+#include "../AI/WoWEnemyController.h"
+#include "BehaviorTree/BlackboardComponent.h"
 
 UWoWEnemyAttackAbility::UWoWEnemyAttackAbility()
 {
@@ -33,14 +37,36 @@ void UWoWEnemyAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Ha
         return;
     }
     
-    // Get target from TriggerEventData if provided
+    UE_LOG(LogTemp, Warning, TEXT("Enemy Attack Ability activated by %s"), *SourceActor->GetName());
+    
+    // Find target via AI blackboard if this is an AI character
     AActor* TargetActor = nullptr;
-    if (TriggerEventData && TriggerEventData->Target)
+    AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(SourceActor);
+    if (EnemyCharacter)
     {
-        TargetActor = const_cast<AActor*>(TriggerEventData->Target.Get());
+        UE_LOG(LogTemp, Warning, TEXT("Source is a WoWEnemyCharacter"));
+        
+        // Get the AI controller
+        AWoWEnemyController* EnemyController = Cast<AWoWEnemyController>(EnemyCharacter->GetController());
+        if (EnemyController && EnemyController->GetBlackboardComponent())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Found EnemyController with Blackboard"));
+            
+            // Get target from blackboard - use the same key name as in BTTask_PerformAttack
+            TargetActor = Cast<AActor>(EnemyController->GetBlackboardComponent()->GetValueAsObject("TargetActor"));
+            
+            if (TargetActor)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Found target from blackboard: %s"), *TargetActor->GetName());
+            }
+        }
     }
-    else
+    
+    // Fallback to finding nearest player if no target found via blackboard
+    if (!TargetActor)
     {
+        UE_LOG(LogTemp, Warning, TEXT("No target from blackboard, searching for nearest player"));
+        
         // Find closest player character in range
         TArray<AActor*> FoundActors;
         UGameplayStatics::GetAllActorsOfClass(GetWorld(), ACharacter::StaticClass(), FoundActors);
@@ -59,6 +85,11 @@ void UWoWEnemyAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Ha
                 }
             }
         }
+        
+        if (TargetActor)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Found nearest player target: %s"), *TargetActor->GetName());
+        }
     }
     
     // If we have a target, calculate and apply damage based on stats
@@ -67,25 +98,30 @@ void UWoWEnemyAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Ha
         // Calculate damage based on enemy stats
         float DamageAmount = 10.0f; // Default fallback value
         
-        AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(SourceActor);
-        if (EnemyCharacter)
+        AWoWEnemyCharacter* EnemySource = Cast<AWoWEnemyCharacter>(SourceActor);
+        if (EnemySource)
         {
             // Use the enemy's base damage calculation
-            DamageAmount = EnemyCharacter->CalculateBaseDamage() * DamageCoefficient;
+            DamageAmount = EnemySource->CalculateBaseDamage() * DamageCoefficient;
+            UE_LOG(LogTemp, Warning, TEXT("Calculated damage: %.2f"), DamageAmount);
         }
         
         // Apply the damage
         ApplyDamageToTarget(Handle, ActorInfo, ActivationInfo, TargetActor, DamageAmount);
         
-        // Apply cooldown - UE5.4 version
+        // Apply cooldown
         if (CooldownDuration > 0.0f)
         {
             FGameplayTagContainer CooldownTags;
             CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName("Ability.Attack.Melee")));
             
-            // Just call the base ApplyCooldown method with correct parameters
+            // Just call the base ApplyCooldown method
             ApplyCooldown(Handle, ActorInfo, ActivationInfo);
         }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("No target found for attack!"));
     }
     
     // End the ability
@@ -95,6 +131,7 @@ void UWoWEnemyAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Ha
 void UWoWEnemyAttackAbility::ApplyDamageToTarget(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, AActor* TargetActor, float DamageAmount)
 {
     // Debug: Log the target and damage amount
+    UE_LOG(LogTemp, Warning, TEXT("==== ENEMY ATTACK DEBUG ===="));
     UE_LOG(LogTemp, Warning, TEXT("Attempting to apply %.2f damage to %s"), DamageAmount, *TargetActor->GetName());
     
     if (!TargetActor || !DamageEffect)
@@ -110,9 +147,38 @@ void UWoWEnemyAttackAbility::ApplyDamageToTarget(const FGameplayAbilitySpecHandl
         UE_LOG(LogTemp, Warning, TEXT("Target's health before damage: %.2f / %.2f"), 
             TargetCharacter->GetHealth(), TargetCharacter->GetMaxHealth());
     }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Target is not a WoWCharacterBase!"));
+    }
     
-    // Use the globals function to get ASC
-    UAbilitySystemComponent* TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TargetActor);
+    // Get the correct ASC based on target type
+    UAbilitySystemComponent* TargetASC = nullptr;
+    
+    // Check if it's a player character first
+    AWoWPlayerCharacter* PlayerTarget = Cast<AWoWPlayerCharacter>(TargetActor);
+    if (PlayerTarget)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Target is a WoWPlayerCharacter, getting ASC from PlayerState"));
+        AWoWPlayerState* PS = PlayerTarget->GetPlayerState<AWoWPlayerState>();
+        if (PS)
+        {
+            TargetASC = PS->GetAbilitySystemComponent();
+            UE_LOG(LogTemp, Warning, TEXT("Got ASC from PlayerState: %s"), 
+                TargetASC ? TEXT("Success") : TEXT("Failed"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to get PlayerState from target"));
+        }
+    }
+    else
+    {
+        // For non-player targets, use the global function
+        UE_LOG(LogTemp, Warning, TEXT("Target is not a player, getting ASC directly"));
+        TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TargetActor);
+    }
+    
     if (!TargetASC)
     {
         UE_LOG(LogTemp, Error, TEXT("Failed to get AbilitySystemComponent from target %s"), *TargetActor->GetName());
@@ -121,6 +187,17 @@ void UWoWEnemyAttackAbility::ApplyDamageToTarget(const FGameplayAbilitySpecHandl
     else
     {
         UE_LOG(LogTemp, Warning, TEXT("Found AbilitySystemComponent on target %s"), *TargetActor->GetName());
+    }
+    
+    // Debug the ability system component owner
+    AActor* ASCOwner = TargetASC->GetOwner();
+    if (ASCOwner)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ASC Owner: %s"), *ASCOwner->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ASC has no owner!"));
     }
     
     // Create the effect context
@@ -144,7 +221,7 @@ void UWoWEnemyAttackAbility::ApplyDamageToTarget(const FGameplayAbilitySpecHandl
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("Data.Damage tag is NOT valid!"));
+            UE_LOG(LogTemp, Error, TEXT("Data.Damage tag is NOT valid! Create this tag in project settings."));
         }
         
         // Make damage negative since we're reducing health
@@ -164,6 +241,11 @@ void UWoWEnemyAttackAbility::ApplyDamageToTarget(const FGameplayAbilitySpecHandl
             {
                 UE_LOG(LogTemp, Warning, TEXT("Target's health after damage: %.2f / %.2f"), 
                     TargetCharacter->GetHealth(), TargetCharacter->GetMaxHealth());
+                
+                if (FMath::IsNearlyEqual(TargetCharacter->GetHealth(), TargetCharacter->GetMaxHealth()))
+                {
+                    UE_LOG(LogTemp, Error, TEXT("HEALTH DIDN'T CHANGE! Check if GE_Damage is set up correctly."));
+                }
             }
         }
         else
@@ -175,6 +257,8 @@ void UWoWEnemyAttackAbility::ApplyDamageToTarget(const FGameplayAbilitySpecHandl
     {
         UE_LOG(LogTemp, Error, TEXT("Failed to create valid GameplayEffectSpec!"));
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("==== END ENEMY ATTACK DEBUG ===="));
 }
 
 void UWoWEnemyAttackAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)

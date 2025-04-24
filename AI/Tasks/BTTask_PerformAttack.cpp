@@ -3,8 +3,10 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayAbilitySpec.h"
-// Use the correct relative path based on your project structure
 #include "../../Character/WoWEnemyCharacter.h"
+#include "../../Character/WoWPlayerCharacter.h"
+#include "../../States/WoWPlayerState.h"
+#include "AbilitySystemGlobals.h"
 
 UBTTask_PerformAttack::UBTTask_PerformAttack()
 {
@@ -14,16 +16,20 @@ UBTTask_PerformAttack::UBTTask_PerformAttack()
 
 EBTNodeResult::Type UBTTask_PerformAttack::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
+    UE_LOG(LogTemp, Warning, TEXT("==== PERFORM ATTACK TASK STARTED ===="));
+    
     // Get AI controller and enemy character
     AAIController* AIController = OwnerComp.GetAIOwner();
     if (!AIController)
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get AI Controller"));
         return EBTNodeResult::Failed;
     }
     
     AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(AIController->GetPawn());
     if (!EnemyCharacter)
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get Enemy Character"));
         return EBTNodeResult::Failed;
     }
     
@@ -31,45 +37,113 @@ EBTNodeResult::Type UBTTask_PerformAttack::ExecuteTask(UBehaviorTreeComponent& O
     UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
     if (!BlackboardComp)
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get BlackboardComponent"));
         return EBTNodeResult::Failed;
     }
     
     AActor* TargetActor = Cast<AActor>(BlackboardComp->GetValueAsObject(TargetKey));
     if (!TargetActor)
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get Target Actor from Blackboard"));
         return EBTNodeResult::Failed;
     }
     
+    UE_LOG(LogTemp, Warning, TEXT("Target found: %s"), *TargetActor->GetName());
+    
     // Get ability system component and try to activate the ability
     UAbilitySystemComponent* AbilitySystemComp = EnemyCharacter->GetAbilitySystemComponent();
-    if (!AbilitySystemComp || !AttackAbility.Get())
+    if (!AbilitySystemComp)
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get AbilitySystemComponent from enemy"));
+        return EBTNodeResult::Failed;
+    }
+    
+    // Get target ASC - this handles both enemy and player targets
+    UAbilitySystemComponent* TargetASC = nullptr;
+    if (TargetActor->IsA(AWoWPlayerCharacter::StaticClass()))
+    {
+        // For player characters, try to get ASC from PlayerState
+        UE_LOG(LogTemp, Warning, TEXT("Target is a player character, getting ASC from PlayerState"));
+        AWoWPlayerCharacter* PlayerTarget = Cast<AWoWPlayerCharacter>(TargetActor);
+        if (PlayerTarget)
+        {
+            AWoWPlayerState* PS = PlayerTarget->GetPlayerState<AWoWPlayerState>();
+            if (PS)
+            {
+                TargetASC = PS->GetAbilitySystemComponent();
+                UE_LOG(LogTemp, Warning, TEXT("Got ASC from PlayerState: %s"), 
+                    TargetASC ? TEXT("Success") : TEXT("Failed"));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to get PlayerState"));
+            }
+        }
+    }
+    else
+    {
+        // For non-player targets, get ASC directly
+        TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TargetActor);
+        UE_LOG(LogTemp, Warning, TEXT("Target is not a player, getting ASC directly: %s"), 
+            TargetASC ? TEXT("Success") : TEXT("Failed"));
+    }
+    
+    if (!TargetASC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get Target AbilitySystemComponent"));
+        // Continue anyway, as the ability itself will handle target finding
+    }
+    
+    if (!AttackAbility.Get())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Attack Ability is not set in BTTask_PerformAttack!"));
         return EBTNodeResult::Failed;
     }
     
     // Find the ability spec
     FGameplayAbilitySpec* AbilitySpec = nullptr;
+    UE_LOG(LogTemp, Warning, TEXT("Searching for ability of class: %s"), *AttackAbility->GetName());
+    UE_LOG(LogTemp, Warning, TEXT("Number of activatable abilities: %d"), AbilitySystemComp->GetActivatableAbilities().Num());
+    
     for (FGameplayAbilitySpec& Spec : AbilitySystemComp->GetActivatableAbilities())
     {
-        if (Spec.Ability && Spec.Ability->GetClass() == AttackAbility)
+        if (Spec.Ability)
         {
-            AbilitySpec = &Spec;
-            break;
+            UE_LOG(LogTemp, Warning, TEXT("Found ability: %s"), *Spec.Ability->GetName());
+            if (Spec.Ability->GetClass() == AttackAbility)
+            {
+                AbilitySpec = &Spec;
+                UE_LOG(LogTemp, Warning, TEXT("Found matching ability"));
+                break;
+            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Found null ability in spec"));
         }
     }
     
     if (AbilitySpec)
     {
-        // Create event data with target
-        FGameplayEventData EventData;
-        EventData.Target = TargetActor;
+        UE_LOG(LogTemp, Warning, TEXT("AbilitySpec found"));
         
-        // Try to activate the ability - UE5.4 version may have different signature
+        // Try to activate the ability - UE 5.4 version
         if (AbilitySystemComp->TryActivateAbility(AbilitySpec->Handle))
         {
+            UE_LOG(LogTemp, Warning, TEXT("Successfully activated ability"));
+            UE_LOG(LogTemp, Warning, TEXT("==== PERFORM ATTACK TASK SUCCEEDED ===="));
             return EBTNodeResult::Succeeded;
         }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to activate ability"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("AbilitySpec not found for attack ability"));
     }
     
+    UE_LOG(LogTemp, Warning, TEXT("==== PERFORM ATTACK TASK FAILED ===="));
     return EBTNodeResult::Failed;
 }

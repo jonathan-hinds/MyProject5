@@ -29,7 +29,7 @@ public:
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
     // Returns the attribute set
-    UWoWAttributeSet* GetAttributeSet() const;
+    virtual UWoWAttributeSet* GetAttributeSet() const;
 
     // Initialize the attributes from a data table
     virtual void InitializeAttributes();

@@ -6,6 +6,8 @@
 
 class UBehaviorTree;
 class UPawnSensingComponent;
+class UAbilitySystemComponent;
+class UWoWAttributeSet;
 
 // Enemy type enum (melee, ranged, caster)
 UENUM(BlueprintType)
@@ -44,6 +46,10 @@ public:
     // Calculate base damage for an attack
     UFUNCTION(BlueprintCallable, Category = "Combat")
     float CalculateBaseDamage() const;
+    
+    // Override the base class functions to return the ASC on this enemy
+    virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+    virtual UWoWAttributeSet* GetAttributeSet() const override;
 
 protected:
     // Component for detecting players
@@ -69,6 +75,14 @@ protected:
     // Detection range
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "AI")
     float SightRadius;
+    
+    // Ability System Component for the enemy
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Abilities")
+    UAbilitySystemComponent* AbilitySystemComponent;
+
+    // Attribute Set
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Abilities")
+    UWoWAttributeSet* AttributeSet;
     
     // Callback for when a pawn is seen
     UFUNCTION()
