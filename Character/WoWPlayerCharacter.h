@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WoWCharacterBase.h"
+#include "../Components/TargetingComponent.h"
 #include "WoWPlayerCharacter.generated.h"
 
 class USpringArmComponent;
@@ -35,11 +36,19 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Mesh)
     UStaticMeshComponent* CharacterMesh;
 
+    // Targeting component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Targeting")
+    UTargetingComponent* TargetingComponent;
+
     // Movement functions
     void MoveForward(float Value);
     void MoveRight(float Value);
     void Turn(float Value);
     void LookUp(float Value);
+
+    // Targeting input handlers
+    void OnTargetEnemy();
+    void OnTargetAndAttackEnemy();
 
 public:
     // Override from base class to handle ability system related setup for player

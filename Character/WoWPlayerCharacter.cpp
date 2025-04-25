@@ -6,6 +6,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "AbilitySystemComponent.h"
 #include "../States/WoWPlayerState.h"
+#include "../Character/WoWEnemyCharacter.h"
+#include "Engine/Engine.h"
 
 AWoWPlayerCharacter::AWoWPlayerCharacter()
 {
@@ -33,6 +35,9 @@ AWoWPlayerCharacter::AWoWPlayerCharacter()
     CharacterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CharacterMesh"));
     CharacterMesh->SetupAttachment(RootComponent);
     CharacterMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));  // Position the mesh correctly
+    
+    // Create targeting component
+    TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
     
     // Note: The skeletal mesh and animation blueprint references will be set in the editor
     
@@ -62,6 +67,10 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
     // Jump binding
     PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
     PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
+    
+    // Targeting bindings
+    PlayerInputComponent->BindAction("TargetEnemy", IE_Pressed, this, &AWoWPlayerCharacter::OnTargetEnemy);
+    PlayerInputComponent->BindAction("TargetAndAttackEnemy", IE_Pressed, this, &AWoWPlayerCharacter::OnTargetAndAttackEnemy);
 }
 
 void AWoWPlayerCharacter::MoveForward(float Value)
@@ -100,6 +109,88 @@ void AWoWPlayerCharacter::Turn(float Value)
 void AWoWPlayerCharacter::LookUp(float Value)
 {
     AddControllerPitchInput(Value * 0.5f);
+}
+
+void AWoWPlayerCharacter::OnTargetEnemy()
+{
+    // Add at the start of the function
+    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("OnTargetEnemy Called"));
+    
+    // Rest of your original code...
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (!PC)
+    {
+        // Add this debug message in the error path
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Controller is null"));
+        return;
+    }
+    
+    FHitResult HitResult;
+    if (PC->GetHitResultUnderCursor(ECC_Visibility, true, HitResult))
+    {
+        // Add this debug message after successful hit test
+        if (GEngine && HitResult.GetActor()) 
+            GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, 
+                FString::Printf(TEXT("Hit: %s"), *HitResult.GetActor()->GetName()));
+        
+        AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(HitResult.GetActor());
+        if (EnemyCharacter)
+        {
+            // Add this after successful enemy cast
+            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Blue, TEXT("Hit an enemy"));
+            
+            // Set as target
+            TargetingComponent->SetTarget(EnemyCharacter);
+            
+            // Add this after setting target
+            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("Target set"));
+        }
+        else
+        {
+            // Add this in the failure path
+            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Not an enemy"));
+        }
+    }
+    else
+    {
+        // Add this in the hit test failure path
+        if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("No hit under cursor"));
+    }
+}
+void AWoWPlayerCharacter::OnTargetAndAttackEnemy()
+{
+    // Get player controller
+    APlayerController* PC = Cast<APlayerController>(GetController());
+    if (!PC)
+    {
+        return;
+    }
+    
+    // Perform trace from mouse position
+    FHitResult HitResult;
+    if (PC->GetHitResultUnderCursor(ECC_Visibility, true, HitResult))
+    {
+        // Check if we hit an enemy character
+        AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(HitResult.GetActor());
+        if (EnemyCharacter)
+        {
+            // Set as target and start auto-attack
+            TargetingComponent->SetTarget(EnemyCharacter);
+            TargetingComponent->StartAutoAttack();
+        }
+        else
+        {
+            // Clear target if we clicked on something else
+            TargetingComponent->ClearTarget();
+            TargetingComponent->StopAutoAttack();
+        }
+    }
+    else
+    {
+        // Clear target if we didn't hit anything
+        TargetingComponent->ClearTarget();
+        TargetingComponent->StopAutoAttack();
+    }
 }
 
 void AWoWPlayerCharacter::PossessedBy(AController* NewController)
