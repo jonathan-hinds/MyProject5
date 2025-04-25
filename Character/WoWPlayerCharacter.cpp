@@ -7,6 +7,7 @@
 #include "AbilitySystemComponent.h"
 #include "../States/WoWPlayerState.h"
 #include "../Character/WoWEnemyCharacter.h"
+#include "../Components/TargetingComponent.h"
 #include "Engine/Engine.h"
 
 AWoWPlayerCharacter::AWoWPlayerCharacter()
@@ -111,16 +112,16 @@ void AWoWPlayerCharacter::LookUp(float Value)
     AddControllerPitchInput(Value * 0.5f);
 }
 
+// In Character/WoWPlayerCharacter.cpp
+
 void AWoWPlayerCharacter::OnTargetEnemy()
 {
     // Add at the start of the function
     if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("OnTargetEnemy Called"));
     
-    // Rest of your original code...
     APlayerController* PC = Cast<APlayerController>(GetController());
     if (!PC)
     {
-        // Add this debug message in the error path
         if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Controller is null"));
         return;
     }
@@ -128,35 +129,39 @@ void AWoWPlayerCharacter::OnTargetEnemy()
     FHitResult HitResult;
     if (PC->GetHitResultUnderCursor(ECC_Visibility, true, HitResult))
     {
-        // Add this debug message after successful hit test
         if (GEngine && HitResult.GetActor()) 
             GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, 
                 FString::Printf(TEXT("Hit: %s"), *HitResult.GetActor()->GetName()));
         
-        AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(HitResult.GetActor());
-        if (EnemyCharacter)
+        // Check if we hit any WoWCharacterBase (enemy or player)
+        AWoWCharacterBase* TargetCharacter = Cast<AWoWCharacterBase>(HitResult.GetActor());
+        if (TargetCharacter && TargetCharacter != this) // Don't target self
         {
-            // Add this after successful enemy cast
-            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Blue, TEXT("Hit an enemy"));
+            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Blue, TEXT("Hit a targetable character"));
             
             // Set as target
-            TargetingComponent->SetTarget(EnemyCharacter);
+            TargetingComponent->SetTarget(TargetCharacter);
             
-            // Add this after setting target
             if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("Target set"));
         }
-        else
+        else if (HitResult.GetActor() == nullptr || !TargetCharacter)
         {
-            // Add this in the failure path
-            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("Not an enemy"));
+            // Clicked on empty space or non-character - clear target
+            TargetingComponent->ClearTarget();
+            
+            if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange, TEXT("Target cleared"));
         }
     }
     else
     {
-        // Add this in the hit test failure path
+        // No hit result - clicked on empty space, clear target
+        TargetingComponent->ClearTarget();
+        
         if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("No hit under cursor"));
     }
 }
+// In Character/WoWPlayerCharacter.cpp
+
 void AWoWPlayerCharacter::OnTargetAndAttackEnemy()
 {
     // Get player controller
@@ -170,17 +175,28 @@ void AWoWPlayerCharacter::OnTargetAndAttackEnemy()
     FHitResult HitResult;
     if (PC->GetHitResultUnderCursor(ECC_Visibility, true, HitResult))
     {
-        // Check if we hit an enemy character
-        AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(HitResult.GetActor());
-        if (EnemyCharacter)
+        // Check if we hit any WoWCharacterBase (enemy or player)
+        AWoWCharacterBase* TargetCharacter = Cast<AWoWCharacterBase>(HitResult.GetActor());
+        if (TargetCharacter && TargetCharacter != this) // Don't target self
         {
-            // Set as target and start auto-attack
-            TargetingComponent->SetTarget(EnemyCharacter);
-            TargetingComponent->StartAutoAttack();
+            // Set as target
+            TargetingComponent->SetTarget(TargetCharacter);
+            
+            // Only start auto-attack if it's an enemy
+            AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(TargetCharacter);
+            if (EnemyCharacter)
+            {
+                TargetingComponent->StartAutoAttack();
+            }
+            else
+            {
+                // It's a player, so don't auto-attack
+                TargetingComponent->StopAutoAttack();
+            }
         }
         else
         {
-            // Clear target if we clicked on something else
+            // Clear target if we clicked on something else or empty space
             TargetingComponent->ClearTarget();
             TargetingComponent->StopAutoAttack();
         }

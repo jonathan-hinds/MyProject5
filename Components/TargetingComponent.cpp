@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "GameFramework/PlayerState.h"
 
 UTargetingComponent::UTargetingComponent()
 {
@@ -49,6 +50,8 @@ void UTargetingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
     }
 }
 
+// In Components/TargetingComponent.cpp
+
 void UTargetingComponent::HandleTargetSelection()
 {
     // Get player controller
@@ -65,26 +68,39 @@ void UTargetingComponent::HandleTargetSelection()
         FHitResult HitResult;
         if (PC->GetHitResultUnderCursor(ECC_Visibility, true, HitResult))
         {
-            // Check if we hit an enemy character
-            AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(HitResult.GetActor());
-            if (EnemyCharacter)
+            // Check if we hit a targetable character (enemy or player)
+            AWoWCharacterBase* TargetCharacter = Cast<AWoWCharacterBase>(HitResult.GetActor());
+            if (TargetCharacter)
             {
-                // Set as target
-                SetTarget(EnemyCharacter);
-                
-                // Start auto-attack
-                StartAutoAttack();
+                // Don't allow targeting self
+                if (TargetCharacter != GetOwner())
+                {
+                    // Set as target
+                    SetTarget(TargetCharacter);
+                    
+                    // Only start auto-attack if it's an enemy
+                    AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(TargetCharacter);
+                    if (EnemyCharacter)
+                    {
+                        StartAutoAttack();
+                    }
+                    else
+                    {
+                        // It's a player, so don't auto-attack
+                        StopAutoAttack();
+                    }
+                }
             }
             else
             {
-                // Clear target if we clicked on something else
+                // Clicked on something that's not a character - clear target
                 ClearTarget();
                 StopAutoAttack();
             }
         }
         else
         {
-            // Clear target if we didn't hit anything
+            // No hit result - clicked on empty space, clear target
             ClearTarget();
             StopAutoAttack();
         }
@@ -97,16 +113,32 @@ void UTargetingComponent::HandleTargetSelection()
         FHitResult HitResult;
         if (PC->GetHitResultUnderCursor(ECC_Visibility, true, HitResult))
         {
-            // Check if we hit an enemy character
-            AWoWEnemyCharacter* EnemyCharacter = Cast<AWoWEnemyCharacter>(HitResult.GetActor());
-            if (EnemyCharacter)
+            // Check if we hit a targetable character (enemy or player)
+            AWoWCharacterBase* TargetCharacter = Cast<AWoWCharacterBase>(HitResult.GetActor());
+            if (TargetCharacter)
             {
-                // Set as target (without auto-attack)
-                SetTarget(EnemyCharacter);
+                // Don't allow targeting self
+                if (TargetCharacter != GetOwner())
+                {
+                    // Set as target (without auto-attack)
+                    SetTarget(TargetCharacter);
+                }
             }
+            else
+            {
+                // Clicked on something that's not a character - clear target
+                ClearTarget();
+            }
+        }
+        else
+        {
+            // No hit result - clicked on empty space, clear target
+            ClearTarget();
         }
     }
 }
+
+// In Components/TargetingComponent.cpp
 
 void UTargetingComponent::HandleAutoAttack()
 {
@@ -116,13 +148,22 @@ void UTargetingComponent::HandleAutoAttack()
         return;
     }
     
+    // Only auto-attack enemies, not players
+    AWoWEnemyCharacter* EnemyTarget = Cast<AWoWEnemyCharacter>(CurrentTarget);
+    if (!EnemyTarget)
+    {
+        // Target is not an enemy, don't auto-attack
+        StopAutoAttack();
+        return;
+    }
+    
     // Check if we have a timer running
     if (GetWorld()->GetTimerManager().IsTimerActive(AutoAttackTimerHandle))
     {
         return;
     }
     
-    // Check if we're in range for melee attack
+    // Calculate distance to target
     AActor* Owner = GetOwner();
     if (!Owner)
     {
@@ -146,8 +187,6 @@ void UTargetingComponent::HandleAutoAttack()
         }
         return;
     }
-    
-    // We're in range, so perform the attack
     
     // Get the ability system component
     IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Owner);
@@ -305,6 +344,8 @@ void UTargetingComponent::GetTargetMana(float& Mana, float& MaxMana) const
     }
 }
 
+// In Components/TargetingComponent.cpp
+
 FString UTargetingComponent::GetTargetName() const
 {
     if (!HasValidTarget())
@@ -312,6 +353,25 @@ FString UTargetingComponent::GetTargetName() const
         return FString();
     }
     
+    // For players, try to get a more friendly name
+    AController* TargetController = nullptr;
+    APawn* TargetPawn = Cast<APawn>(CurrentTarget);
+    if (TargetPawn)
+    {
+        TargetController = TargetPawn->GetController();
+    }
+    
+    if (TargetController && TargetController->IsPlayerController())
+    {
+        // It's a player character, try to get the player name
+        APlayerState* PS = TargetController->PlayerState;
+        if (PS)
+        {
+            return PS->GetPlayerName();
+        }
+    }
+    
+    // Fallback to actor name
     return CurrentTarget->GetName();
 }
 
