@@ -17,6 +17,7 @@ UTargetingComponent::UTargetingComponent()
     AutoAttackDelay = 2.0f;
     AutoAttackAbilityTag = "Ability.Attack.Melee";
     bIsAutoAttacking = false;
+    MeleeAttackRange = 200.0f; // Set this to your desired melee range in Unreal units
 }
 
 void UTargetingComponent::BeginPlay()
@@ -121,8 +122,34 @@ void UTargetingComponent::HandleAutoAttack()
         return;
     }
     
-    // Get the ability system component
+    // Check if we're in range for melee attack
     AActor* Owner = GetOwner();
+    if (!Owner)
+    {
+        return;
+    }
+    
+    // Calculate distance to target
+    float DistanceToTarget = FVector::Dist(Owner->GetActorLocation(), CurrentTarget->GetActorLocation());
+    
+    // If we're too far away, don't perform the attack but keep auto-attack enabled
+    // Just set a shorter timer to check again soon
+    if (DistanceToTarget > MeleeAttackRange)
+    {
+        // Set a short timer to check again
+        GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, 0.5f, false);
+        
+        // Optional: Display a "Too far away" message if you want visual feedback
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Yellow, TEXT("Auto-attack active - target out of range"));
+        }
+        return;
+    }
+    
+    // We're in range, so perform the attack
+    
+    // Get the ability system component
     IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Owner);
     if (!ASCInterface)
     {
@@ -135,13 +162,11 @@ void UTargetingComponent::HandleAutoAttack()
         return;
     }
     
-    // Try to activate the auto attack ability using the correct method
-    // Create a GameplayTagContainer with our ability tag
+    // Activate the auto attack ability
     FGameplayTagContainer AbilityTagContainer;
     AbilityTagContainer.AddTag(FGameplayTag::RequestGameplayTag(FName(AutoAttackAbilityTag)));
     
     // Activate an ability with the matching tags
-    // Use TryActivateAbilitiesByTag instead of TryActivateAbilityByTag
     AbilitySystemComponent->TryActivateAbilitiesByTag(AbilityTagContainer);
     
     // Set timer for next attack
@@ -308,8 +333,14 @@ void UTargetingComponent::StartAutoAttack()
         bIsAutoAttacking = true;
     }
     
-    // Reset timer to start attacking immediately - this is fine to do locally
+    // Reset timer to start checking immediately - this is fine to do locally
     GetWorld()->GetTimerManager().ClearTimer(AutoAttackTimerHandle);
+    
+    // Optional: Display a message that auto-attack is active
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("Auto-attack started"));
+    }
 }
 
 bool UTargetingComponent::Server_StartAutoAttack_Validate()

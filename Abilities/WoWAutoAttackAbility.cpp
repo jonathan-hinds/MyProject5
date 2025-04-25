@@ -48,6 +48,16 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
     // Get the target
     AActor* TargetActor = TargetingComp->GetCurrentTarget();
     
+    // Check if in range before attacking - silent fail if out of range
+    float MeleeRange = 200.0f; // Should match the value in TargetingComponent
+    float DistanceToTarget = FVector::Dist(OwnerActor->GetActorLocation(), TargetActor->GetActorLocation());
+    if (DistanceToTarget > MeleeRange)
+    {
+        // Too far away, just end the ability without an error
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+        return;
+    }
+    
     // Calculate damage - WoW style based on character stats
     AWoWCharacterBase* OwnerCharacter = Cast<AWoWCharacterBase>(OwnerActor);
     float DamageAmount = 0.0f;
@@ -65,7 +75,7 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
             
             // Apply WoW-like formula: WeaponDamage + (AP / 14 * WeaponSpeed)
             float WeaponSpeed = 2.0f; // Assume a 2.0 speed weapon
-            DamageAmount = WeaponBaseDamage + (AttackPower / 14.0f * WeaponSpeed);
+            DamageAmount = WeaponBaseDamage + (AttackPower / 14.0f);
             
             // Optional: Check for critical strike based on character's crit chance
             float CritChance = AttributeSet->GetCriticalStrikeChance();
@@ -74,6 +84,19 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
             if (IsCriticalHit)
             {
                 DamageAmount *= 2.0f; // Double damage on critical hit
+                
+                // Optional: Display a "Critical Hit!" message
+                if (GEngine)
+                {
+                    GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, 
+                        FString::Printf(TEXT("Critical Hit! %.0f damage"), DamageAmount));
+                }
+            }
+            else if (GEngine)
+            {
+                // Optional: Display normal hit message
+                GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::White, 
+                    FString::Printf(TEXT("Hit for %.0f damage"), DamageAmount));
             }
         }
         else

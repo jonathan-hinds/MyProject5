@@ -81,6 +81,9 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Combat")
+	float MeleeAttackRange;
+
     // Current target
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Targeting")
     AActor* CurrentTarget;
