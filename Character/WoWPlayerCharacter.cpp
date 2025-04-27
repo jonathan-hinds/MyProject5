@@ -8,7 +8,9 @@
 #include "../States/WoWPlayerState.h"
 #include "../Character/WoWEnemyCharacter.h"
 #include "../Components/TargetingComponent.h"
+#include "../Components/HotbarComponent.h"
 #include "Engine/Engine.h"
+
 
 AWoWPlayerCharacter::AWoWPlayerCharacter()
 {
@@ -39,7 +41,7 @@ AWoWPlayerCharacter::AWoWPlayerCharacter()
     
     // Create targeting component
     TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
-    
+    HotbarComponent = CreateDefaultSubobject<UHotbarComponent>(TEXT("HotbarComponent"));
     // Note: The skeletal mesh and animation blueprint references will be set in the editor
     
     // Don't rotate character to camera direction
@@ -72,6 +74,20 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
     // Targeting bindings
     PlayerInputComponent->BindAction("TargetEnemy", IE_Pressed, this, &AWoWPlayerCharacter::OnTargetEnemy);
     PlayerInputComponent->BindAction("TargetAndAttackEnemy", IE_Pressed, this, &AWoWPlayerCharacter::OnTargetAndAttackEnemy);
+
+    // Hotbar bindings
+    PlayerInputComponent->BindAction("HotbarSlot1", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot1);
+    PlayerInputComponent->BindAction("HotbarSlot2", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot2);
+    PlayerInputComponent->BindAction("HotbarSlot3", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot3);
+    PlayerInputComponent->BindAction("HotbarSlot4", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot4);
+    PlayerInputComponent->BindAction("HotbarSlot5", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot5);
+    PlayerInputComponent->BindAction("HotbarSlot6", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot6);
+    PlayerInputComponent->BindAction("HotbarSlot7", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot7);
+    PlayerInputComponent->BindAction("HotbarSlot8", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot8);
+    PlayerInputComponent->BindAction("HotbarSlot9", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot9);
+    PlayerInputComponent->BindAction("HotbarSlot10", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot10);
+    PlayerInputComponent->BindAction("HotbarSlot11", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot11);
+    PlayerInputComponent->BindAction("HotbarSlot12", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot12);
 }
 
 void AWoWPlayerCharacter::MoveForward(float Value)
@@ -85,6 +101,33 @@ void AWoWPlayerCharacter::MoveForward(float Value)
         // Get forward vector
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         AddMovementInput(Direction, Value);
+    }
+}
+
+void AWoWPlayerCharacter::OnHotbarSlot1() { HandleHotbarSlot(0); }
+void AWoWPlayerCharacter::OnHotbarSlot2() { HandleHotbarSlot(1); }
+void AWoWPlayerCharacter::OnHotbarSlot3() { HandleHotbarSlot(2); }
+void AWoWPlayerCharacter::OnHotbarSlot4() { HandleHotbarSlot(3); }
+void AWoWPlayerCharacter::OnHotbarSlot5() { HandleHotbarSlot(4); }
+void AWoWPlayerCharacter::OnHotbarSlot6() { HandleHotbarSlot(5); }
+void AWoWPlayerCharacter::OnHotbarSlot7() { HandleHotbarSlot(6); }
+void AWoWPlayerCharacter::OnHotbarSlot8() { HandleHotbarSlot(7); }
+void AWoWPlayerCharacter::OnHotbarSlot9() { HandleHotbarSlot(8); }
+void AWoWPlayerCharacter::OnHotbarSlot10() { HandleHotbarSlot(9); }
+void AWoWPlayerCharacter::OnHotbarSlot11() { HandleHotbarSlot(10); }
+void AWoWPlayerCharacter::OnHotbarSlot12() { HandleHotbarSlot(11); }
+
+void AWoWPlayerCharacter::HandleHotbarSlot(int32 SlotIndex)
+{
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+            FString::Printf(TEXT("Hotbar slot %d pressed"), SlotIndex + 1));
+    }
+    
+    if (HotbarComponent)
+    {
+        HotbarComponent->ActivateAbilityInSlot(SlotIndex);
     }
 }
 
@@ -209,6 +252,7 @@ void AWoWPlayerCharacter::OnTargetAndAttackEnemy()
     }
 }
 
+// Update WoWPlayerCharacter.cpp PossessedBy function:
 void AWoWPlayerCharacter::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
@@ -227,6 +271,15 @@ void AWoWPlayerCharacter::PossessedBy(AController* NewController)
             InitializeAttributes();
             GiveAbilities();
             ApplyStartupEffects();
+            
+            // Now that the ASC is fully set up, initialize the hotbar
+            if (HotbarComponent)
+            {
+                if (DefaultAbilityDataAsset)
+                {
+                    HotbarComponent->InitializeHotbar(DefaultAbilityDataAsset);
+                }
+            }
         }
     }
 }
