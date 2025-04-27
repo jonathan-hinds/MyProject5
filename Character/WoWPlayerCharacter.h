@@ -86,4 +86,5 @@ public:
     // Get hotbar component
     UFUNCTION(BlueprintPure, Category = "Abilities")
     UHotbarComponent* GetHotbarComponent() const { return HotbarComponent; }
+    
 };

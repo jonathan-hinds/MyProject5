@@ -9,6 +9,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "GameFramework/PlayerState.h"
+#include "../Abilities/WoWAutoAttackAbility.h"
 
 UTargetingComponent::UTargetingComponent()
 {
