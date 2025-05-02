@@ -14,12 +14,13 @@ PublicDependencyModuleNames.AddRange(new string[] {
     "Engine", 
     "InputCore",
     "HeadMountedDisplay",
-    "GameplayAbilities",  // Make sure this is included
-    "GameplayTags",       // And this
-    "GameplayTasks",      // And this
+    "GameplayAbilities",
+    "GameplayTags",
+    "GameplayTasks",
     "UMG",
-    "AIModule",           // For AI functionality
-    "NavigationSystem"    // For AI navigation
+    "AIModule",
+    "NavigationSystem",
+    "Niagara"  // Add this line
 });
 		
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

@@ -3,6 +3,7 @@
 #include "../Attributes/WoWAttributeSet.h"
 #include "GameplayEffect.h"
 #include "GameplayAbilitySpec.h"
+#include "../Components/EffectApplicationComponent.h"
 #include "../States/WoWPlayerState.h"
 
 AWoWCharacterBase::AWoWCharacterBase()
@@ -12,12 +13,18 @@ AWoWCharacterBase::AWoWCharacterBase()
 
     // Flag to track ability initialization
     bAbilitiesInitialized = false;
+    EffectApplicationComponent = CreateDefaultSubobject<UEffectApplicationComponent>(TEXT("EffectApplicationComponent"));
+
 }
 
 void AWoWCharacterBase::BeginPlay()
 {
     Super::BeginPlay();
     
+    {
+        EffectApplicationComponent->SetEffectDataAsset(EffectDataAsset);
+    }
+
     // Initialization moved to PossessedBy or OnRep_PlayerState
 }
 

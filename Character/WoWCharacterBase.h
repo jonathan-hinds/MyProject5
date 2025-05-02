@@ -1,3 +1,4 @@
+// In WoWCharacterBase.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,6 +11,9 @@ class UAbilitySystemComponent;
 class UWoWAttributeSet;
 class UGameplayEffect;
 class UGameplayAbility;
+class UEffectApplicationComponent;
+class UEffectDataAsset;
+class UAbilityDataAsset;
 
 UCLASS()
 class MYPROJECT5_API AWoWCharacterBase : public ACharacter, public IAbilitySystemInterface
@@ -39,10 +43,26 @@ public:
 
     // Apply the startup effects (like setting base attributes)
     virtual void ApplyStartupEffects();
+    
+    // Get the Effect Application Component
+    UFUNCTION(BlueprintPure, Category = "Effects")
+    UEffectApplicationComponent* GetEffectApplicationComponent() const { return EffectApplicationComponent; }
+    
+    // Get the Ability Data Asset
+    UFUNCTION(BlueprintPure, Category = "Abilities")
+    UAbilityDataAsset* GetAbilityDataAsset() const { return AbilityDataAsset; }
+    
+    // Get the Effect Data Asset
+    UFUNCTION(BlueprintPure, Category = "Effects")
+    UEffectDataAsset* GetEffectDataAsset() const { return EffectDataAsset; }
 
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
+    
+    // Effect Application component
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Effects")
+    UEffectApplicationComponent* EffectApplicationComponent;
 
     // Default attributes that will be used to set our starting values
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
@@ -51,6 +71,14 @@ protected:
     // Default abilities that will be granted to this character
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
     TArray<TSubclassOf<UGameplayAbility>> DefaultAbilities;
+    
+    // Ability data asset
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
+    UAbilityDataAsset* AbilityDataAsset;
+    
+    // Effect data asset
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Effects")
+    UEffectDataAsset* EffectDataAsset;
 
     // Flag to determine if the abilities have been initialized
     bool bAbilitiesInitialized;
