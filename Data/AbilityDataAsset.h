@@ -13,10 +13,12 @@ class UTexture2D;
 UENUM(BlueprintType)
 enum class EAbilityType : uint8
 {
-    Instant UMETA(DisplayName = "Instant"),
-    Channeled UMETA(DisplayName = "Channeled"),
-    Passive UMETA(DisplayName = "Passive"),
-    Toggle UMETA(DisplayName = "Toggle")
+    Instant UMETA(DisplayName = "Instant"), // No target needed, instant cast
+    Target UMETA(DisplayName = "Target"),   // Requires target, instant cast
+    Cast UMETA(DisplayName = "Cast"),       // Requires target, has cast time
+    Friendly UMETA(DisplayName = "Friendly"), // Can target friendly players
+    Area UMETA(DisplayName = "Area"),       // AoE effect
+    Passive UMETA(DisplayName = "Passive")  // Passive ability
 };
 
 USTRUCT(BlueprintType)

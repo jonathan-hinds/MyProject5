@@ -1,3 +1,4 @@
+// WoWGameplayAbilityBase.cpp
 #include "WoWGameplayAbilityBase.h"
 #include "../Components/EffectApplicationComponent.h"
 #include "AbilitySystemComponent.h"
@@ -6,6 +7,7 @@
 #include "../Character/WoWCharacterBase.h"
 #include "../Character/WoWPlayerCharacter.h"
 #include "../Components/TargetingComponent.h"
+#include "../Attributes/WoWAttributeSet.h" // Critical include!
 
 UWoWGameplayAbilityBase::UWoWGameplayAbilityBase()
 {
@@ -17,7 +19,6 @@ bool UWoWGameplayAbilityBase::GetAbilityData(FAbilityTableRow& OutAbilityData) c
 {
     if (bAbilityDataLoaded)
     {
-        OutAbilityData = CachedAbilityData;
         return true;
     }
     
@@ -25,12 +26,17 @@ bool UWoWGameplayAbilityBase::GetAbilityData(FAbilityTableRow& OutAbilityData) c
     if (AbilityDataAsset)
     {
         bool bFound = AbilityDataAsset->GetAbilityDataByID(AbilityID, OutAbilityData);
-        if (bFound)
+        if (!bFound)
         {
-            // Cache it for future use (we need to cast away const here)
-            UWoWGameplayAbilityBase* MutableThis = const_cast<UWoWGameplayAbilityBase*>(this);
-            MutableThis->CachedAbilityData = OutAbilityData;
-            MutableThis->bAbilityDataLoaded = true;
+            // NEW: Debug the data table contents
+            TArray<FAbilityTableRow*> AllRows;
+            AbilityDataAsset->AbilityDataTable->GetAllRows(TEXT("GetAbilityData"), AllRows);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Available ability IDs in data table:"));
+            for (FAbilityTableRow* Row : AllRows)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("  ID: %d, Name: %s"), Row->AbilityID, *Row->DisplayName);
+            }
         }
         return bFound;
     }
@@ -73,83 +79,427 @@ UEffectApplicationComponent* UWoWGameplayAbilityBase::GetEffectComponent() const
     return EffectComp;
 }
 
-void UWoWGameplayAbilityBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle, 
+                                       const FGameplayAbilityActorInfo* ActorInfo, 
+                                       const FGameplayAbilityActivationInfo ActivationInfo, 
+                                       bool bReplicateEndAbility, bool bWasCancelled)
 {
-    UE_LOG(LogTemp, Warning, TEXT("WoWAbility Activated - ID: %d"), AbilityID);
-    
-    // Try to load ability data if not already loaded
-    if (!bAbilityDataLoaded)
+    if (!bWasCancelled)
     {
-        // Try to find the data asset
-        if (!AbilityDataAsset)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("No AbilityDataAsset found, trying to get from character"));
-            // Try to find from owner
-            AWoWCharacterBase* Character = Cast<AWoWCharacterBase>(GetAvatarActorFromActorInfo());
-            if (Character)
-            {
-                AbilityDataAsset = Character->GetAbilityDataAsset();
-                if (AbilityDataAsset)
-                {
-                    UE_LOG(LogTemp, Warning, TEXT("Found AbilityDataAsset from character"));
-                }
-                else
-                {
-                    UE_LOG(LogTemp, Error, TEXT("Character has no AbilityDataAsset!"));
-                }
-            }
-        }
-        
-        // Try to load ability data
+        // Get ability data for cooldown info
         FAbilityTableRow AbilityData;
-        bool bFound = GetAbilityData(AbilityData);
-        if (bFound)
+        if (GetAbilityData(AbilityData) && AbilityData.Cooldown > 0.0f)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Loaded ability data: %s"), *AbilityData.DisplayName);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Error, TEXT("Failed to load ability data for ID: %d"), AbilityID);
+            // Apply ability-specific cooldown
+            UGameplayEffect* CooldownGE = NewObject<UGameplayEffect>(GetTransientPackage(), FName(TEXT("AbilityCooldown")));
+            CooldownGE->DurationPolicy = EGameplayEffectDurationType::HasDuration;
+            CooldownGE->DurationMagnitude = FScalableFloat(AbilityData.Cooldown);
+            
+            FGameplayEffectSpecHandle SpecHandle = ActorInfo->AbilitySystemComponent->MakeOutgoingSpec(
+                CooldownGE->GetClass(), 1.0f, ActorInfo->AbilitySystemComponent->MakeEffectContext());
+            
+            if (SpecHandle.IsValid())
+            {
+                FGameplayTagContainer CooldownTags;
+                // Use the proper registered tags
+                CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName("Ability.Cooldown")));
+                CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName(FString::Printf(TEXT("Cooldown.ID.%d"), AbilityID))));
+                
+                SpecHandle.Data->DynamicGrantedTags = CooldownTags;
+                
+                ActorInfo->AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
+                UE_LOG(LogTemp, Warning, TEXT("Applied %.1f second cooldown to ability %s"), 
+                    AbilityData.Cooldown, *AbilityData.DisplayName);
+            }
         }
     }
     
-    // Get the avatar actor (our character)
-    AActor* AvatarActor = GetAvatarActorFromActorInfo();
+    Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+}
+
+bool UWoWGameplayAbilityBase::CanActivateAbility(const FGameplayAbilitySpecHandle Handle, 
+                                               const FGameplayAbilityActorInfo* ActorInfo, 
+                                               const FGameplayTagContainer* SourceTags, 
+                                               const FGameplayTagContainer* TargetTags, 
+                                               OUT FGameplayTagContainer* OptionalRelevantTags) const
+{
+    // First check if parent class allows activation
+    if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags))
+    {
+        return false;
+    }
+    
+    // Check if ability is on cooldown
+    if (ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
+    {
+        FGameplayTagContainer CooldownTags;
+        CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName(FString::Printf(TEXT("Cooldown.ID.%d"), AbilityID))));
+        
+        if (ActorInfo->AbilitySystemComponent->HasAnyMatchingGameplayTags(CooldownTags))
+        {
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Ability on cooldown"));
+            }
+            UE_LOG(LogTemp, Warning, TEXT("Ability %d is still on cooldown"), AbilityID);
+            return false;
+        }
+    }
+    
+    // Get ability data
+    FAbilityTableRow AbilityData;
+    bool bGotData = GetAbilityData(AbilityData);
+    
+    // If no data, fall back to default behavior
+    if (!bGotData)
+    {
+        return true;
+    }
+    
+    // Check if this ability requires a target
+    bool bRequiresTarget = (AbilityData.AbilityType == EAbilityType::Target || 
+                           AbilityData.AbilityType == EAbilityType::Cast);
+    
+    if (bRequiresTarget)
+    {
+        // Validate target existence
+        if (!ActorInfo || !ActorInfo->AvatarActor.IsValid())
+        {
+            return false;
+        }
+        
+        // Get player character
+        AWoWPlayerCharacter* PlayerCharacter = Cast<AWoWPlayerCharacter>(ActorInfo->AvatarActor.Get());
+        if (!PlayerCharacter)
+        {
+            return false;
+        }
+        
+        // Check targeting component
+        UTargetingComponent* TargetingComp = PlayerCharacter->FindComponentByClass<UTargetingComponent>();
+        if (!TargetingComp || !TargetingComp->HasValidTarget())
+        {
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("This ability requires a target."));
+            }
+            UE_LOG(LogTemp, Warning, TEXT("%s requires a target, but none is selected"), *GetName());
+            return false;
+        }
+        
+        // Check if target is a player (can't target players with harmful spells)
+        AActor* TargetActor = TargetingComp->GetCurrentTarget();
+        if (TargetActor)
+        {
+            AWoWPlayerCharacter* PlayerTarget = Cast<AWoWPlayerCharacter>(TargetActor);
+            if (PlayerTarget && AbilityData.AbilityType != EAbilityType::Friendly)
+            {
+                if (GEngine)
+                {
+                    GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, TEXT("Cannot target other players with this ability."));
+                }
+                UE_LOG(LogTemp, Warning, TEXT("Cannot target other players with %s"), *GetName());
+                return false;
+            }
+        }
+    }
+    
+    // All checks passed
+    return true;
+}
+
+void UWoWGameplayAbilityBase::ActivateAbility(const FGameplayAbilitySpecHandle Handle, 
+                                            const FGameplayAbilityActorInfo* ActorInfo, 
+                                            const FGameplayAbilityActivationInfo ActivationInfo, 
+                                            const FGameplayEventData* TriggerEventData)
+{
+    UE_LOG(LogTemp, Warning, TEXT("==== ABILITY ACTIVATION STARTED ===="));
+    UE_LOG(LogTemp, Warning, TEXT("Attempting to activate ability ID: %d"), AbilityID);
+    
+    // Try to get AbilityDataAsset if not already set
+    if (!AbilityDataAsset && ActorInfo && ActorInfo->AvatarActor.IsValid())
+    {
+        AWoWCharacterBase* Character = Cast<AWoWCharacterBase>(ActorInfo->AvatarActor.Get());
+        if (Character)
+        {
+            AbilityDataAsset = Character->GetAbilityDataAsset();
+        }
+    }
+    
+    // Get ability data
+    FAbilityTableRow AbilityData;
+    bool bGotData = GetAbilityData(AbilityData);
+    
+    if (bGotData)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Activating ability: %s (ID: %d)"), *AbilityData.DisplayName, AbilityID);
+        
+        // Check if this has a cast time
+        if (AbilityData.CastTime > 0.0f)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Started casting %s with %.1f second cast time"), 
+                *AbilityData.DisplayName, AbilityData.CastTime);
+            
+            // Store ability info for later use
+            CurrentSpecHandle = Handle;
+            CurrentActorInfo = ActorInfo;
+            CurrentActivationInfo = ActivationInfo;
+            
+            // Start a timer to delay ability execution
+            GetWorld()->GetTimerManager().SetTimer(
+                CastTimerHandle,
+                this,
+                &UWoWGameplayAbilityBase::OnCastTimeComplete,
+                AbilityData.CastTime,
+                false
+            );
+            
+            // Broadcast an event to notify UI/VFX that casting has started
+            OnAbilityCastStarted.Broadcast(AbilityData);
+            return;
+        }
+    }
+    
+    // For instant cast abilities, just commit and execute right away
+    if (CommitAbility(Handle, ActorInfo, ActivationInfo))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Ability committed successfully"));
+        
+        // Consume mana if we have data
+        if (bGotData)
+        {
+            ConsumeManaCost(AbilityData.ManaCost, ActorInfo);
+        }
+        
+        // Execute the ability
+        ExecuteAbility(Handle, ActorInfo, ActivationInfo);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to commit ability"));
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+    }
+}
+
+void UWoWGameplayAbilityBase::ExecuteAbility(const FGameplayAbilitySpecHandle Handle, 
+                                           const FGameplayAbilityActorInfo* ActorInfo, 
+                                           const FGameplayAbilityActivationInfo ActivationInfo)
+{
+    // Apply any effects to target or self
+    AActor* AvatarActor = ActorInfo->AvatarActor.Get();
     if (!AvatarActor)
     {
-        UE_LOG(LogTemp, Error, TEXT("No avatar actor found for ability"));
-        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
     }
     
-    // Try to get the targeting component to find current target
+    AWoWPlayerCharacter* PlayerCharacter = Cast<AWoWPlayerCharacter>(AvatarActor);
+    if (!PlayerCharacter)
+    {
+        return;
+    }
+    
+    UTargetingComponent* TargetingComp = PlayerCharacter->FindComponentByClass<UTargetingComponent>();
+    if (!TargetingComp)
+    {
+        return;
+    }
+    
+    // Get ability data
+    FAbilityTableRow AbilityData;
+    bool bGotData = GetAbilityData(AbilityData);
+    
+    // Check if we have a target
+    if (TargetingComp->HasValidTarget())
+    {
+        AActor* TargetActor = TargetingComp->GetCurrentTarget();
+        if (TargetActor)
+        {
+            // Apply effects to target
+            ApplyEffectsToTarget(TargetActor, EEffectContainerType::Target);
+        }
+    }
+    else if (bGotData && AbilityData.SelfEffects.EffectIDs.Num() > 0)
+    {
+        // Apply self effects if no target but we have self effects
+        ApplyEffectsToTarget(PlayerCharacter, EEffectContainerType::Self);
+    }
+}
+
+void UWoWGameplayAbilityBase::OnCastTimeComplete()
+{
+    UE_LOG(LogTemp, Warning, TEXT("==== CAST TIME COMPLETED ===="));
+    
+    if (!CurrentActorInfo || !CurrentSpecHandle.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Invalid actor info or ability handle!"));
+        return;
+    }
+    
+    // Double-check CanActivateAbility again to ensure targeting is still valid
+    if (!CanActivateAbility(CurrentSpecHandle, CurrentActorInfo, nullptr, nullptr, nullptr))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Ability can no longer be activated (target lost?)"));
+        CancelAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true);
+        return;
+    }
+    
+    FAbilityTableRow AbilityData;
+    if (GetAbilityData(AbilityData))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Cast completed for ability: %s"), *AbilityData.DisplayName);
+        
+        // Now that cast is complete, commit the ability and apply effects
+        if (CommitAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Ability committed successfully after cast"));
+            ConsumeManaCost(AbilityData.ManaCost, CurrentActorInfo);
+            ExecuteGameplayEffects(CurrentActorInfo);
+            
+            // Broadcast cast complete event
+            OnAbilityCastComplete.Broadcast(AbilityData);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to commit ability after cast completion"));
+            EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get ability data after cast completion"));
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+    }
+}
+
+void UWoWGameplayAbilityBase::ConsumeManaCost(float ManaCost, const FGameplayAbilityActorInfo* ActorInfo)
+{
+    if (!ActorInfo || !ActorInfo->AbilitySystemComponent.IsValid())
+    {
+        return;
+    }
+    
+    const UWoWAttributeSet* AttributeSet = Cast<UWoWAttributeSet>(ActorInfo->AbilitySystemComponent->GetAttributeSet(UWoWAttributeSet::StaticClass()));
+    if (AttributeSet)
+    {
+        float CurrentMana = AttributeSet->GetMana();
+        float NewMana = FMath::Max(0.0f, CurrentMana - ManaCost);
+        
+        // Use the ASC to modify the attribute instead of directly modifying it
+        ActorInfo->AbilitySystemComponent->SetNumericAttributeBase(UWoWAttributeSet::GetManaAttribute(), NewMana);
+        
+        UE_LOG(LogTemp, Warning, TEXT("Consumed %.1f mana (%.1f -> %.1f)"), 
+            ManaCost, CurrentMana, NewMana);
+    }
+}
+
+void UWoWGameplayAbilityBase::ExecuteGameplayEffects(const FGameplayAbilityActorInfo* ActorInfo)
+{
+    UE_LOG(LogTemp, Warning, TEXT("==== EXECUTING GAMEPLAY EFFECTS ===="));
+    
+    // This is where you'd apply all the effects from your ability
+    AActor* AvatarActor = ActorInfo->AvatarActor.Get();
+    if (!AvatarActor)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No avatar actor found!"));
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        return;
+    }
+    
+    // Get ability data to check ability type
+    FAbilityTableRow AbilityData;
+    bool bGotData = GetAbilityData(AbilityData);
+    
+    // Get target through targeting component
     AWoWPlayerCharacter* PlayerCharacter = Cast<AWoWPlayerCharacter>(AvatarActor);
     if (PlayerCharacter)
     {
         UTargetingComponent* TargetingComp = PlayerCharacter->FindComponentByClass<UTargetingComponent>();
         if (TargetingComp)
         {
-            AActor* TargetActor = TargetingComp->GetCurrentTarget();
-            if (TargetActor)
+            if (TargetingComp->HasValidTarget())
             {
-                UE_LOG(LogTemp, Warning, TEXT("Found target from targeting component: %s"), *TargetActor->GetName());
-                
-                // Apply effects to the target
-                ApplyEffectsToTarget(TargetActor, EEffectContainerType::Target);
+                AActor* TargetActor = TargetingComp->GetCurrentTarget();
+                if (TargetActor)
+                {
+                    // Check if target is a player - don't allow targeting players unless it's a friendly spell
+                    AWoWPlayerCharacter* PlayerTarget = Cast<AWoWPlayerCharacter>(TargetActor);
+                    if (PlayerTarget && bGotData && AbilityData.AbilityType != EAbilityType::Friendly)
+                    {
+                        // Can't target other players with non-friendly abilities
+                        UE_LOG(LogTemp, Warning, TEXT("Cannot target other players with non-friendly abilities"));
+                        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+                        return;
+                    }
+                    
+                    // Apply effects to valid target
+                    bool Success = ApplyEffectsToTarget(TargetActor, EEffectContainerType::Target);
+                    UE_LOG(LogTemp, Warning, TEXT("Apply effects to target result: %s"), 
+                           Success ? TEXT("Success") : TEXT("Failed"));
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Target actor is null despite HasValidTarget returning true!"));
+                    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+                }
             }
             else
             {
-                UE_LOG(LogTemp, Warning, TEXT("Targeting component returned no target"));
+                // No valid target - check if ability requires a target
+                if (bGotData && 
+                    (AbilityData.AbilityType == EAbilityType::Target || 
+                     AbilityData.AbilityType == EAbilityType::Cast))
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("This ability requires a target."));
+                    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+                    return;
+                }
+                
+                // For non-targeted abilities, apply self effects if any
+                if (bGotData && AbilityData.SelfEffects.EffectIDs.Num() > 0)
+                {
+                    bool Success = ApplyEffectsToTarget(PlayerCharacter, EEffectContainerType::Self);
+                    UE_LOG(LogTemp, Warning, TEXT("Apply self effects result: %s"), 
+                           Success ? TEXT("Success") : TEXT("Failed"));
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("No target found and no self effects to apply."));
+                    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+                }
             }
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("No targeting component found on player character"));
+            UE_LOG(LogTemp, Error, TEXT("No targeting component found on player character!"));
+            EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Avatar actor is not a player character!"));
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+    }
+}
+
+void UWoWGameplayAbilityBase::CancelAbility(const FGameplayAbilitySpecHandle Handle, 
+                                         const FGameplayAbilityActorInfo* ActorInfo, 
+                                         const FGameplayAbilityActivationInfo ActivationInfo,
+                                         bool bReplicateCancelAbility)
+{
+    // Clear cast timer if we're in the middle of casting
+    if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(CastTimerHandle))
+    {
+        GetWorld()->GetTimerManager().ClearTimer(CastTimerHandle);
+        
+        // Optional: Broadcast cast interrupted event
+        FAbilityTableRow AbilityData;
+        if (GetAbilityData(AbilityData))
+        {
+            OnAbilityCastInterrupted.Broadcast(AbilityData);
         }
     }
     
-    // Continue with base ability activation
-    Super::ActivateAbility(Handle, ActorInfo, ActivationInfo, TriggerEventData);
+    Super::CancelAbility(Handle, ActorInfo, ActivationInfo, bReplicateCancelAbility);
 }
 
 bool UWoWGameplayAbilityBase::ApplyEffectsToTarget(AActor* TargetActor, EEffectContainerType ContainerType)
