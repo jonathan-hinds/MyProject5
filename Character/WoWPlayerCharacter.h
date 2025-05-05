@@ -17,7 +17,12 @@ class MYPROJECT5_API AWoWPlayerCharacter : public AWoWCharacterBase
     GENERATED_BODY()
     
 public:
+
     AWoWPlayerCharacter();
+    virtual void Tick(float DeltaTime) override;
+
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_ApplyAbilityEffect(int32 AbilityID, AActor* Target);
 
     // Called to bind functionality to input
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;

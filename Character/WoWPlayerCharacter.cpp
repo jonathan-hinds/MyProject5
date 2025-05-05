@@ -9,6 +9,9 @@
 #include "../Character/WoWEnemyCharacter.h"
 #include "../Components/TargetingComponent.h"
 #include "../Components/HotbarComponent.h"
+#include "../Components/EffectApplicationComponent.h" // Add this include
+#include "../Data/AbilityDataAsset.h" // Add this include
+#include "../Data/AbilityEffectTypes.h" // Add this include
 #include "Engine/Engine.h"
 
 
@@ -265,7 +268,9 @@ void AWoWPlayerCharacter::PossessedBy(AController* NewController)
         UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent();
         if (ASC)
         {
+            // This is crucial - set up the ability actor info
             ASC->InitAbilityActorInfo(PS, this);
+            UE_LOG(LogTemp, Warning, TEXT("**** ASC Actor Info Initialized ****"));
             
             // Initialize attributes and abilities
             InitializeAttributes();
@@ -288,6 +293,8 @@ void AWoWPlayerCharacter::OnRep_PlayerState()
 {
     Super::OnRep_PlayerState();
     
+    UE_LOG(LogTemp, Warning, TEXT("***** OnRep_PlayerState Called *****"));
+    
     // Get the player state on clients
     AWoWPlayerState* PS = GetPlayerState<AWoWPlayerState>();
     if (PS)
@@ -297,18 +304,176 @@ void AWoWPlayerCharacter::OnRep_PlayerState()
         if (ASC)
         {
             ASC->InitAbilityActorInfo(PS, this);
+            UE_LOG(LogTemp, Warning, TEXT("***** Client ASC Actor Info Initialized *****"));
             
             // Force a refresh of replicated data
             ASC->ForceReplication();
             
-            // Simple debug print without requiring Cast to UWoWAttributeSet
-            if (GEngine)
+            // Debug any tags that might already be on the ASC
+            FGameplayTagContainer AllGameplayTags; // Changed variable name from Tags to AllGameplayTags
+            ASC->GetOwnedGameplayTags(AllGameplayTags);
+            if (AllGameplayTags.Num() > 0)
             {
-                // Just check if we're getting the attribute set
-                GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, 
-                    FString::Printf(TEXT("OnRep_PlayerState: HasAttributeSet=%s"), 
-                    PS->GetAttributeSet() ? TEXT("Yes") : TEXT("No")));
+                UE_LOG(LogTemp, Warning, TEXT("ASC has %d tags when PlayerState is replicated:"), AllGameplayTags.Num());
+                for (const FGameplayTag& Tag : AllGameplayTags)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("  - %s"), *Tag.ToString());
+                }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ASC has no tags when PlayerState is replicated"));
             }
         }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("OnRep_PlayerState: No AbilitySystemComponent found!"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("OnRep_PlayerState: No PlayerState found!"));
+    }
+}
+
+void AWoWPlayerCharacter::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+    
+    // Simple debug message to confirm Tick is running
+    static float SimpleTimer = 0.0f;
+    SimpleTimer += DeltaTime;
+    
+    if (SimpleTimer >= 5.0f)
+    {
+        SimpleTimer = 0.0f;
+        
+        // Get ability system component
+        UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+        if (ASC)
+        {
+            // Show on-screen debug message
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+                    TEXT("Checking cooldowns in Tick"));
+            }
+            
+            // Get all tags
+            FGameplayTagContainer AllTags;
+            ASC->GetOwnedGameplayTags(AllTags);
+            
+            if (AllTags.Num() > 0)
+            {
+                // Show tag count
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+                    FString::Printf(TEXT("ASC has %d tags"), AllTags.Num()));
+                
+                // Log each tag
+                UE_LOG(LogTemp, Warning, TEXT("==== Current ASC Tags (%d) ===="), AllTags.Num());
+                
+                // Show each tag
+                int32 Index = 0;
+                for (const FGameplayTag& Tag : AllTags)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("  - %s"), *Tag.ToString());
+                    
+                    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
+                        FString::Printf(TEXT("Tag %d: %s"), Index++, *Tag.ToString()));
+                }
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ASC has no tags in Tick"));
+                
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+                    TEXT("ASC has no tags"));
+            }
+            
+            // Check active effects
+            TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
+            if (ActiveEffects.Num() > 0)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("==== Active Effects (%d) ===="), ActiveEffects.Num());
+                
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
+                    FString::Printf(TEXT("ASC has %d active effects"), ActiveEffects.Num()));
+                
+                // Show details for each effect
+                for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
+                {
+                    const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
+                    if (Effect && Effect->Spec.Def)
+                    {
+                        float TimeLeft = Effect->GetTimeRemaining(GetWorld()->GetTimeSeconds());
+                        UE_LOG(LogTemp, Warning, TEXT("  - %s (%.1f seconds left)"), 
+                            *Effect->Spec.Def->GetName(), TimeLeft);
+                    }
+                }
+            }
+            else
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                    TEXT("ASC has no active effects"));
+            }
+        }
+    }
+}
+
+bool AWoWPlayerCharacter::Server_ApplyAbilityEffect_Validate(int32 AbilityID, AActor* Target)
+{
+    // Basic validation
+    return IsValid(Target) && AbilityID > 0;
+}
+
+void AWoWPlayerCharacter::Server_ApplyAbilityEffect_Implementation(int32 AbilityID, AActor* Target)
+{
+    if (!Target)
+    {
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Server received request to apply ability %d to target %s"), 
+        AbilityID, *Target->GetName());
+    
+    // Get the effect application component
+    UEffectApplicationComponent* EffectComp = GetEffectApplicationComponent();
+    if (!EffectComp)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No EffectApplicationComponent found on player"));
+        return;
+    }
+    
+    // Get ability data to find effect IDs
+    UAbilityDataAsset* AbilityAsset = GetAbilityDataAsset();
+    if (!AbilityAsset)
+    {
+        UE_LOG(LogTemp, Error, TEXT("No AbilityDataAsset found"));
+        return;
+    }
+    
+    FAbilityTableRow AbilityData;
+    if (AbilityAsset->GetAbilityDataByID(AbilityID, AbilityData))
+    {
+        // Apply the target effects from this ability
+        if (AbilityData.TargetEffects.EffectIDs.Num() > 0)
+        {
+            // Apply effects to the target
+            bool Success = EffectComp->ApplyEffectContainerToTarget(AbilityData.TargetEffects, Target);
+            
+            UE_LOG(LogTemp, Warning, TEXT("Server applied effects to target: %s"), 
+                Success ? TEXT("Success") : TEXT("Failed"));
+                
+            if (Success && GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
+                    FString::Printf(TEXT("Server: Applied ability %d effects to %s"), 
+                    AbilityID, *Target->GetName()));
+            }
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Server couldn't find ability data for ID %d"), AbilityID);
     }
 }
