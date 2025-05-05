@@ -1,4 +1,5 @@
 // File: WoWGameplayAbilityBase.h
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -35,15 +36,15 @@ public:
                           const FGameplayAbilityActivationInfo ActivationInfo, 
                           bool bReplicateEndAbility, bool bWasCancelled) override;
                           
-                          virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle, 
-                            const FGameplayAbilityActorInfo* ActorInfo, 
-                            const FGameplayTagContainer* SourceTags = nullptr, 
-                            const FGameplayTagContainer* TargetTags = nullptr, 
-                            OUT FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
-
-                            void ExecuteAbility(const FGameplayAbilitySpecHandle Handle, 
+    virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle, 
                                 const FGameplayAbilityActorInfo* ActorInfo, 
-                                const FGameplayAbilityActivationInfo ActivationInfo);
+                                const FGameplayTagContainer* SourceTags = nullptr, 
+                                const FGameplayTagContainer* TargetTags = nullptr, 
+                                OUT FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
+
+    void ExecuteAbility(const FGameplayAbilitySpecHandle Handle, 
+                    const FGameplayAbilityActorInfo* ActorInfo, 
+                    const FGameplayAbilityActivationInfo ActivationInfo);
 
     // Get the data for this ability
     UFUNCTION(BlueprintCallable, Category = "Ability")
@@ -75,10 +76,18 @@ public:
                               const FGameplayAbilityActivationInfo ActivationInfo,
                               bool bReplicateCancelAbility) override;
     
+    // Get cooldown tag for this ability
+    UFUNCTION(BlueprintCallable, Category = "Cooldown")
+    FGameplayTag GetCooldownTag() const;
+    
 protected:
     // The ability ID from the data table
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Ability")
     int32 AbilityID;
+    
+    // Cooldown GameplayEffect to use
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Cooldown")
+    TSubclassOf<UGameplayEffect> CooldownGameplayEffect;
     
     // Cached ability data
     UPROPERTY(Transient)

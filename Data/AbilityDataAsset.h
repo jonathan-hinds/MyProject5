@@ -54,6 +54,9 @@ struct FAbilityTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cost")
     float ManaCost;
     
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cooldown")
+    FGameplayTag CooldownTag;
+
     // Cooldown in seconds
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cooldown")
     float Cooldown;

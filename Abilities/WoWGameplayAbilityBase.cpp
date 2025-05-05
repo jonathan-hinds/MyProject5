@@ -13,6 +13,22 @@ UWoWGameplayAbilityBase::UWoWGameplayAbilityBase()
 {
     AbilityID = 0;
     bAbilityDataLoaded = false;
+    
+    // Find or create a reference to the cooldown effect
+    static ConstructorHelpers::FClassFinder<UGameplayEffect> DefaultCooldownGEClass(TEXT("/Game/Abilities/Effects/GE_AbilityCooldown_Base"));
+    if (DefaultCooldownGEClass.Succeeded())
+    {
+        CooldownGameplayEffect = DefaultCooldownGEClass.Class;
+        UE_LOG(LogTemp, Warning, TEXT("Found default cooldown effect: %s"), 
+            *CooldownGameplayEffect->GetName());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Failed to find default cooldown effect at path: /Game/Abilities/Effects/GE_AbilityCooldown_Base"));
+    }
+    
+    // Set up default instancing policy
+    InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
 }
 
 bool UWoWGameplayAbilityBase::GetAbilityData(FAbilityTableRow& OutAbilityData) const
@@ -84,37 +100,151 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
                                        const FGameplayAbilityActivationInfo ActivationInfo, 
                                        bool bReplicateEndAbility, bool bWasCancelled)
 {
-    if (!bWasCancelled)
+    UE_LOG(LogTemp, Warning, TEXT("===== ENDING ABILITY %d ====="), AbilityID);
+    UE_LOG(LogTemp, Warning, TEXT("Was Cancelled: %s"), bWasCancelled ? TEXT("YES") : TEXT("NO"));
+    
+    if (!bWasCancelled && ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
     {
         // Get ability data for cooldown info
         FAbilityTableRow AbilityData;
         if (GetAbilityData(AbilityData) && AbilityData.Cooldown > 0.0f)
         {
-            // Apply ability-specific cooldown
-            UGameplayEffect* CooldownGE = NewObject<UGameplayEffect>(GetTransientPackage(), FName(TEXT("AbilityCooldown")));
-            CooldownGE->DurationPolicy = EGameplayEffectDurationType::HasDuration;
-            CooldownGE->DurationMagnitude = FScalableFloat(AbilityData.Cooldown);
+            UE_LOG(LogTemp, Warning, TEXT("Applying cooldown of %.1f seconds to ability ID: %d"), 
+                AbilityData.Cooldown, AbilityID);
             
-            FGameplayEffectSpecHandle SpecHandle = ActorInfo->AbilitySystemComponent->MakeOutgoingSpec(
-                CooldownGE->GetClass(), 1.0f, ActorInfo->AbilitySystemComponent->MakeEffectContext());
-            
-            if (SpecHandle.IsValid())
+            if (CooldownGameplayEffect)
             {
+                UE_LOG(LogTemp, Warning, TEXT("Using cooldown effect: %s"), *CooldownGameplayEffect->GetName());
+                
+                // Use GAS's built-in cooldown handling
                 FGameplayTagContainer CooldownTags;
-                // Use the proper registered tags
-                CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName("Ability.Cooldown")));
-                CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName(FString::Printf(TEXT("Cooldown.ID.%d"), AbilityID))));
+                FGameplayTag CooldownTag = GetCooldownTag();
+                CooldownTags.AddTag(CooldownTag);
                 
-                SpecHandle.Data->DynamicGrantedTags = CooldownTags;
+                UE_LOG(LogTemp, Warning, TEXT("Cooldown Tag: %s"), *CooldownTag.ToString());
                 
-                ActorInfo->AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
-                UE_LOG(LogTemp, Warning, TEXT("Applied %.1f second cooldown to ability %s"), 
-                    AbilityData.Cooldown, *AbilityData.DisplayName);
+                // Create the effect spec
+                FGameplayEffectSpecHandle SpecHandle = MakeOutgoingGameplayEffectSpec(
+                    CooldownGameplayEffect, GetAbilityLevel());
+                
+                if (SpecHandle.IsValid())
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Created valid spec handle"));
+                    
+                    // DEBUGGING: Check if the spec's GameplayEffect is valid
+                    if (SpecHandle.Data->Def)
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("Effect definition is valid: %s"), *SpecHandle.Data->Def->GetName());
+                        UE_LOG(LogTemp, Warning, TEXT("Duration Policy: %d"), (int32)SpecHandle.Data->Def->DurationPolicy);
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("Effect definition is NULL!"));
+                    }
+                    
+                    // Set the cooldown duration
+                    FGameplayTag DurationTag = FGameplayTag::RequestGameplayTag(FName("Data.Cooldown"));
+                    SpecHandle.Data->SetSetByCallerMagnitude(DurationTag, AbilityData.Cooldown);
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("Set cooldown duration to %.1f using tag: %s"), 
+                        AbilityData.Cooldown, *DurationTag.ToString());
+                    
+                    // Add the cooldown tags
+                    SpecHandle.Data->DynamicGrantedTags.AppendTags(CooldownTags);
+                    
+                    UE_LOG(LogTemp, Warning, TEXT("Added cooldown tags to spec:"));
+                    for (const FGameplayTag& Tag : SpecHandle.Data->DynamicGrantedTags)
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT(" - %s"), *Tag.ToString());
+                    }
+                    
+                    // Apply the cooldown
+                    FActiveGameplayEffectHandle ActiveGEHandle = ApplyGameplayEffectSpecToOwner(
+                        Handle, ActorInfo, ActivationInfo, SpecHandle);
+                    
+                    if (ActiveGEHandle.IsValid())
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("Successfully applied cooldown effect with handle: %s"), 
+                            *ActiveGEHandle.ToString());
+                            
+                        // Set a debug timer to check if the cooldown is removed properly
+                        UWorld* World = GetWorld();
+                        if (World)
+                        {
+                            FTimerHandle DebugTimerHandle;
+                            FTimerDelegate TimerDelegate;
+                            
+                            // Store a weak pointer to the ASC
+                            TWeakObjectPtr<UAbilitySystemComponent> WeakASC = ActorInfo->AbilitySystemComponent.Get();
+                            int32 StoredAbilityID = AbilityID;
+                            FGameplayTag StoredCooldownTag = CooldownTag;
+                            
+                            TimerDelegate.BindLambda([StoredAbilityID, StoredCooldownTag, WeakASC]()
+                            {
+                                if (WeakASC.IsValid())
+                                {
+                                    bool bStillHasTag = WeakASC->HasMatchingGameplayTag(StoredCooldownTag);
+                                    UE_LOG(LogTemp, Warning, TEXT("Cooldown timer check for ability %d: Has tag: %s"), 
+                                        StoredAbilityID, bStillHasTag ? TEXT("YES") : TEXT("NO"));
+                                        
+                                    // Log all active GE handles
+                                    TArray<FActiveGameplayEffectHandle> ActiveHandles = WeakASC->GetActiveEffects(FGameplayEffectQuery());
+                                    UE_LOG(LogTemp, Warning, TEXT("Number of active effects: %d"), ActiveHandles.Num());
+                                }
+                            });
+                            
+                            // Check halfway through cooldown
+                            World->GetTimerManager().SetTimer(DebugTimerHandle, TimerDelegate, 
+                                AbilityData.Cooldown / 2.0f, false);
+                                
+                            // Check again after cooldown should have expired
+                            FTimerHandle EndTimerHandle;
+                            World->GetTimerManager().SetTimer(EndTimerHandle, TimerDelegate, 
+                                AbilityData.Cooldown + 0.5f, false);
+                        }
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("Failed to apply cooldown effect to ability %s"), 
+                            *AbilityData.DisplayName);
+                    }
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Failed to create valid cooldown effect spec"));
+                }
             }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("No cooldown GameplayEffect class set for ability %s"), 
+                    *AbilityData.DisplayName);
+            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("No cooldown to apply for this ability or failed to get ability data"));
         }
     }
     
+    UE_LOG(LogTemp, Warning, TEXT("Calling Super::EndAbility"));
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+    UE_LOG(LogTemp, Warning, TEXT("===== END ABILITY COMPLETE ====="));
+}
+
+FGameplayTag UWoWGameplayAbilityBase::GetCooldownTag() const
+{
+    // Get ability data
+    FAbilityTableRow AbilityData;
+    if (GetAbilityData(AbilityData) && AbilityData.CooldownTag.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Using ability-specific cooldown tag: %s"), *AbilityData.CooldownTag.ToString());
+        return AbilityData.CooldownTag;
+    }
+    
+    // Fallback to a generic cooldown tag based on ID
+    FGameplayTag FallbackTag = FGameplayTag::RequestGameplayTag(FName(FString::Printf(TEXT("Ability.Cooldown.ID.%d"), AbilityID)));
+    UE_LOG(LogTemp, Warning, TEXT("Using fallback cooldown tag: %s"), *FallbackTag.ToString());
+    return FallbackTag;
 }
 
 bool UWoWGameplayAbilityBase::CanActivateAbility(const FGameplayAbilitySpecHandle Handle, 
@@ -123,25 +253,89 @@ bool UWoWGameplayAbilityBase::CanActivateAbility(const FGameplayAbilitySpecHandl
                                                const FGameplayTagContainer* TargetTags, 
                                                OUT FGameplayTagContainer* OptionalRelevantTags) const
 {
+    UE_LOG(LogTemp, Warning, TEXT("===== CAN ACTIVATE ABILITY %d ====="), AbilityID);
+    
     // First check if parent class allows activation
     if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Super::CanActivateAbility returned false"));
         return false;
     }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Super::CanActivateAbility returned true"));
     
     // Check if ability is on cooldown
     if (ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
     {
-        FGameplayTagContainer CooldownTags;
-        CooldownTags.AddTag(FGameplayTag::RequestGameplayTag(FName(FString::Printf(TEXT("Cooldown.ID.%d"), AbilityID))));
+        FGameplayTag CooldownTag = GetCooldownTag();
+        UE_LOG(LogTemp, Warning, TEXT("Checking for cooldown tag: %s"), *CooldownTag.ToString());
         
-        if (ActorInfo->AbilitySystemComponent->HasAnyMatchingGameplayTags(CooldownTags))
+        // DEBUG: Log all tags on the ASC
+        FGameplayTagContainer AllTags;
+        ActorInfo->AbilitySystemComponent->GetOwnedGameplayTags(AllTags);
+        UE_LOG(LogTemp, Warning, TEXT("All tags on ASC (%d tags):"), AllTags.Num());
+        for (const FGameplayTag& Tag : AllTags)
         {
+            UE_LOG(LogTemp, Warning, TEXT(" - %s"), *Tag.ToString());
+        }
+        
+        bool bHasCooldownTag = ActorInfo->AbilitySystemComponent->HasMatchingGameplayTag(CooldownTag);
+        UE_LOG(LogTemp, Warning, TEXT("Has cooldown tag: %s"), bHasCooldownTag ? TEXT("YES") : TEXT("NO"));
+        
+        if (bHasCooldownTag)
+        {
+            // Get remaining cooldown time for debugging
+            TArray<FActiveGameplayEffectHandle> ActiveEffectHandles = 
+                ActorInfo->AbilitySystemComponent->GetActiveEffects(FGameplayEffectQuery());
+            
+            UE_LOG(LogTemp, Warning, TEXT("Active effects: %d"), ActiveEffectHandles.Num());
+            
+            float TimeRemaining = 0.0f;
+            bool bFoundCooldownEffect = false;
+            
+            // Check each active effect for ones that grant our cooldown tag
+            for (const FActiveGameplayEffectHandle& EffectHandle : ActiveEffectHandles)
+            {
+                const FActiveGameplayEffect* ActiveEffect = ActorInfo->AbilitySystemComponent->GetActiveGameplayEffect(EffectHandle);
+                if (ActiveEffect)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("Found active effect: %s"), 
+                        ActiveEffect->Spec.Def ? *ActiveEffect->Spec.Def->GetName() : TEXT("NULL Def"));
+                    
+                    if (ActiveEffect->Spec.Def && ActiveEffect->Spec.DynamicGrantedTags.HasTag(CooldownTag))
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("This effect grants our cooldown tag"));
+                        
+                        // Get the remaining time
+                        TimeRemaining = ActiveEffect->GetTimeRemaining(ActorInfo->AbilitySystemComponent->GetWorld()->GetTimeSeconds());
+                        
+                        UE_LOG(LogTemp, Warning, TEXT("Remaining time: %.2f seconds"), TimeRemaining);
+                        UE_LOG(LogTemp, Warning, TEXT("Effect handle: %s"), *EffectHandle.ToString());
+                        
+                        bFoundCooldownEffect = true;
+                        break;
+                    }
+                }
+            }
+            
+            // If we found the tag but no matching effect, that's suspicious
+            if (!bFoundCooldownEffect)
+            {
+                UE_LOG(LogTemp, Error, TEXT("Found cooldown tag but no matching effect - this is an error!"));
+            }
+                
+            UE_LOG(LogTemp, Warning, TEXT("Ability %d (%s) on cooldown. %.1f seconds remaining."), 
+                   AbilityID, *CooldownTag.ToString(), TimeRemaining);
+            
+            // Display cooldown message
             if (GEngine)
             {
-                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("Ability on cooldown"));
+                GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, 
+                    FString::Printf(TEXT("%s on cooldown (%.1f sec)"), 
+                    *CooldownTag.ToString(), TimeRemaining));
             }
-            UE_LOG(LogTemp, Warning, TEXT("Ability %d is still on cooldown"), AbilityID);
+            
+            UE_LOG(LogTemp, Warning, TEXT("===== ABILITY BLOCKED BY COOLDOWN ====="));
             return false;
         }
     }
@@ -205,6 +399,7 @@ bool UWoWGameplayAbilityBase::CanActivateAbility(const FGameplayAbilitySpecHandl
     }
     
     // All checks passed
+    UE_LOG(LogTemp, Warning, TEXT("===== ABILITY CAN BE ACTIVATED ====="));
     return true;
 }
 
@@ -357,6 +552,13 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
             
             // Broadcast cast complete event
             OnAbilityCastComplete.Broadcast(AbilityData);
+            
+            // Only end the ability on the server, not on clients
+            if (CurrentActorInfo->IsLocallyControlled() && CurrentActorInfo->AbilitySystemComponent->GetOwnerRole() == ROLE_Authority)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("Ending ability on server"));
+                EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+            }
         }
         else
         {
