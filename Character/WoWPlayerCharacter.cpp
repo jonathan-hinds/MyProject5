@@ -45,6 +45,8 @@ AWoWPlayerCharacter::AWoWPlayerCharacter()
     // Create targeting component
     TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
     HotbarComponent = CreateDefaultSubobject<UHotbarComponent>(TEXT("HotbarComponent"));
+    CastingComponent = CreateDefaultSubobject<UCastingComponent>(TEXT("CastingComponent"));
+
     // Note: The skeletal mesh and animation blueprint references will be set in the editor
     
     // Don't rotate character to camera direction

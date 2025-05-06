@@ -4,6 +4,7 @@
 #include "WoWCharacterBase.h"
 #include "../Components/TargetingComponent.h"
 #include "../Components/HotbarComponent.h"
+#include "../Components/CastingComponent.h"
 #include "WoWPlayerCharacter.generated.h"
 
 
@@ -24,12 +25,18 @@ public:
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_ApplyAbilityEffect(int32 AbilityID, AActor* Target);
 
+    UFUNCTION(BlueprintPure, Category = "Abilities")
+    UCastingComponent* GetCastingComponent() const { return CastingComponent; }
+
     // Called to bind functionality to input
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Abilities")
+UCastingComponent* CastingComponent;
 
     // Camera boom positioning the camera behind the character
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera)

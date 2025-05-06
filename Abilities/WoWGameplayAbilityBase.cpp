@@ -473,6 +473,11 @@ void UWoWGameplayAbilityBase::ActivateAbility(const FGameplayAbilitySpecHandle H
     UE_LOG(LogTemp, Warning, TEXT("==== ABILITY ACTIVATION STARTED ===="));
     UE_LOG(LogTemp, Warning, TEXT("Attempting to activate ability ID: %d"), AbilityID);
     
+    // Store the ability handles for later use
+    CurrentSpecHandle = Handle;
+    CurrentActorInfo = ActorInfo;
+    CurrentActivationInfo = ActivationInfo;
+    
     // Try to get AbilityDataAsset if not already set
     if (!AbilityDataAsset && ActorInfo && ActorInfo->AvatarActor.IsValid())
     {
@@ -497,12 +502,7 @@ void UWoWGameplayAbilityBase::ActivateAbility(const FGameplayAbilitySpecHandle H
             UE_LOG(LogTemp, Warning, TEXT("Started casting %s with %.1f second cast time"), 
                 *AbilityData.DisplayName, AbilityData.CastTime);
             
-            // Store ability info for later use
-            CurrentSpecHandle = Handle;
-            CurrentActorInfo = ActorInfo;
-            CurrentActivationInfo = ActivationInfo;
-            
-            // Start a timer to delay ability execution
+            // Set up a timer to delay ability execution
             GetWorld()->GetTimerManager().SetTimer(
                 CastTimerHandle,
                 this,
@@ -510,6 +510,18 @@ void UWoWGameplayAbilityBase::ActivateAbility(const FGameplayAbilitySpecHandle H
                 AbilityData.CastTime,
                 false
             );
+            
+            // Notify the casting component
+            AActor* OwnerActor = ActorInfo->AvatarActor.Get();
+            if (OwnerActor)
+            {
+                UCastingComponent* CastingComp = OwnerActor->FindComponentByClass<UCastingComponent>();
+                if (CastingComp)
+                {
+                    bool bCanCastWhileMoving = AbilityTags.HasTag(FGameplayTag::RequestGameplayTag(FName("Ability.CanCastWhileMoving")));
+                    CastingComp->NotifyCastStarted(AbilityData.DisplayName, AbilityData.CastTime, bCanCastWhileMoving);
+                }
+            }
             
             // Broadcast an event to notify UI/VFX that casting has started
             OnAbilityCastStarted.Broadcast(AbilityData);
@@ -609,6 +621,18 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
         if (CommitAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo))
         {
             UE_LOG(LogTemp, Warning, TEXT("Ability committed successfully after cast"));
+            
+            // Notify the casting component about completion
+            AActor* OwnerActor = CurrentActorInfo->AvatarActor.Get();
+            if (OwnerActor)
+            {
+                UCastingComponent* CastingComp = OwnerActor->FindComponentByClass<UCastingComponent>();
+                if (CastingComp)
+                {
+                    CastingComp->NotifyCastCompleted();
+                }
+            }
+            
             ConsumeManaCost(AbilityData.ManaCost, CurrentActorInfo);
             ExecuteGameplayEffects(CurrentActorInfo);
             
@@ -780,14 +804,25 @@ void UWoWGameplayAbilityBase::ExecuteGameplayEffects(const FGameplayAbilityActor
 
 
 void UWoWGameplayAbilityBase::CancelAbility(const FGameplayAbilitySpecHandle Handle, 
-                                         const FGameplayAbilityActorInfo* ActorInfo, 
-                                         const FGameplayAbilityActivationInfo ActivationInfo,
-                                         bool bReplicateCancelAbility)
+                                          const FGameplayAbilityActorInfo* ActorInfo, 
+                                          const FGameplayAbilityActivationInfo ActivationInfo,
+                                          bool bReplicateCancelAbility)
 {
     // Clear cast timer if we're in the middle of casting
     if (GetWorld() && GetWorld()->GetTimerManager().IsTimerActive(CastTimerHandle))
     {
         GetWorld()->GetTimerManager().ClearTimer(CastTimerHandle);
+        
+        // Notify the casting component about interruption
+        AActor* OwnerActor = ActorInfo->AvatarActor.Get();
+        if (OwnerActor)
+        {
+            UCastingComponent* CastingComp = OwnerActor->FindComponentByClass<UCastingComponent>();
+            if (CastingComp)
+            {
+                CastingComp->NotifyCastInterrupted();
+            }
+        }
         
         // Optional: Broadcast cast interrupted event
         FAbilityTableRow AbilityData;
