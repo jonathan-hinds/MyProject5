@@ -2,6 +2,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
+#include "Misc/OutputDeviceNull.h"
+#include "../Character/WoWPlayerCharacter.h"
 #include "TimerManager.h"
 
 UHealthManaComponent::UHealthManaComponent()
@@ -20,7 +22,6 @@ void UHealthManaComponent::BeginPlay()
 
 void UHealthManaComponent::CreateHUDWidget()
 {
-    // Only create the HUD for locally controlled players
     APlayerController* PC = nullptr;
     APawn* Owner = Cast<APawn>(GetOwner());
     
@@ -28,15 +29,12 @@ void UHealthManaComponent::CreateHUDWidget()
     {
         PC = Cast<APlayerController>(Owner->GetController());
         
-        // Only create HUD widget for locally controlled pawns
         if (PC && PC->IsLocalController() && HUDWidgetClass)
         {
-            // Create the HUD widget
             HUDWidget = CreateWidget<UUserWidget>(PC, HUDWidgetClass);
             
             if (HUDWidget)
             {
-                // Add the widget to the viewport
                 HUDWidget->AddToViewport();
             }
         }
