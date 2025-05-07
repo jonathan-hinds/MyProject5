@@ -9,13 +9,17 @@
 
 UHotbarComponent::UHotbarComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
     SetIsReplicatedByDefault(true);
     
-    // Initialize with 12 slots (standard WoW hotbar size)
     HotbarSlots.SetNum(12);
-    GlobalCooldownDuration = 1.5f; // Standard WoW GCD
+    GlobalCooldownDuration = 1.5f;
     GlobalCooldownStartTime = -GlobalCooldownDuration;
+}
+
+void UHotbarComponent::Client_StartCooldownAfterCast_Implementation(int32 SlotIndex)
+{
+    StartCooldownAfterCast(SlotIndex);
 }
 
 void UHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -23,6 +27,8 @@ void UHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
     DOREPLIFETIME(UHotbarComponent, AbilityDataAsset);
+    DOREPLIFETIME(UHotbarComponent, CooldownSlotIndices);
+    DOREPLIFETIME(UHotbarComponent, CooldownEndTimes);
 }
 
 void UHotbarComponent::BeginPlay()
@@ -86,15 +92,11 @@ void UHotbarComponent::InitializeHotbar(UAbilityDataAsset* DataAsset)
     
     AbilityDataAsset = DataAsset;
     
-    // On clients, we just store the data asset
-    // The server will handle ability granting
     if (GetOwnerRole() < ROLE_Authority)
     {
         return;
     }
     
-    // Server continues with ability granting
-    // Try to get the ASC if we don't have it
     if (!OwnerAbilitySystem)
     {
         AActor* Owner = GetOwner();
@@ -108,7 +110,6 @@ void UHotbarComponent::InitializeHotbar(UAbilityDataAsset* DataAsset)
         }
     }
     
-    // Go through all abilities and set them in their default slots
     TArray<FAbilityTableRow*> AllAbilities;
     DataAsset->AbilityDataTable->GetAllRows(TEXT("InitializeHotbar"), AllAbilities);
     
@@ -119,6 +120,8 @@ void UHotbarComponent::InitializeHotbar(UAbilityDataAsset* DataAsset)
             SetAbilityInSlot(AbilityRow->DefaultHotbarSlot - 1, AbilityRow->AbilityID);
         }
     }
+    
+    NotifyHotbarUIUpdate();
 }
 
 void UHotbarComponent::SetAbilityInSlot(int32 SlotIndex, int32 AbilityID)
@@ -128,11 +131,9 @@ void UHotbarComponent::SetAbilityInSlot(int32 SlotIndex, int32 AbilityID)
         return;
     }
     
-    // Get ability data from data table
     static const FString ContextString(TEXT("SetAbilityInSlot"));
     FAbilityTableRow* AbilityData = nullptr;
     
-    // Find ability data in table
     TArray<FAbilityTableRow*> AllRows;
     AbilityDataAsset->AbilityDataTable->GetAllRows(ContextString, AllRows);
     
@@ -150,12 +151,12 @@ void UHotbarComponent::SetAbilityInSlot(int32 SlotIndex, int32 AbilityID)
         return;
     }
     
-    // Set up the slot
     HotbarSlots[SlotIndex].AbilityID = AbilityID;
     HotbarSlots[SlotIndex].AbilityData = AbilityData;
     
-    // Grant the ability to the owner
     GrantAbilityToOwner(SlotIndex, AbilityData);
+    
+    NotifyHotbarUIUpdate();
 }
 
 void UHotbarComponent::GrantAbilityToOwner(int32 SlotIndex, const FAbilityTableRow* AbilityData)
@@ -204,9 +205,32 @@ void UHotbarComponent::GrantAbilityToOwner(int32 SlotIndex, const FAbilityTableR
 
 void UHotbarComponent::ActivateAbilityInSlot(int32 SlotIndex)
 {
-    // If we're not the server, call the server RPC
     if (GetOwnerRole() < ROLE_Authority)
     {
+        if (SlotIndex >= 0 && SlotIndex < HotbarSlots.Num())
+        {
+            FAbilityTableRow AbilityData;
+            if (GetAbilityDataForSlot(SlotIndex, AbilityData))
+            {
+                if (AbilityData.Cooldown > 0.0f && AbilityData.CastTime <= 0.0f)
+                {
+                    float CurrentTime = GetWorld()->GetTimeSeconds();
+                    float EndTime = CurrentTime + AbilityData.Cooldown;
+                    
+                    int32 ExistingIndex = CooldownSlotIndices.Find(SlotIndex);
+                    if (ExistingIndex != INDEX_NONE)
+                    {
+                        CooldownEndTimes[ExistingIndex] = EndTime;
+                    }
+                    else
+                    {
+                        CooldownSlotIndices.Add(SlotIndex);
+                        CooldownEndTimes.Add(EndTime);
+                    }
+                }
+            }
+        }
+        
         ServerActivateAbilityInSlot(SlotIndex);
         return;
     }
@@ -216,7 +240,6 @@ void UHotbarComponent::ActivateAbilityInSlot(int32 SlotIndex)
         return;
     }
     
-    // Always try to get the ASC fresh
     if (!OwnerAbilitySystem)
     {
         AActor* Owner = GetOwner();
@@ -246,20 +269,151 @@ void UHotbarComponent::ActivateAbilityInSlot(int32 SlotIndex)
         return;
     }
     
-    // Check global cooldown
     if (Slot.AbilityData->bUsesGlobalCooldown && IsOnGlobalCooldown())
     {
         return;
     }
     
-    // Try to activate ability
     bool bSuccess = OwnerAbilitySystem->TryActivateAbility(Slot.AbilityHandle);
     
-    // If successful and ability uses GCD, trigger it
     if (bSuccess && Slot.AbilityData->bUsesGlobalCooldown)
     {
         GlobalCooldownStartTime = GetWorld()->GetTimeSeconds();
     }
+    
+    if (bSuccess && Slot.AbilityData && Slot.AbilityData->Cooldown > 0.0f && Slot.AbilityData->CastTime <= 0.0f)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        float EndTime = CurrentTime + Slot.AbilityData->Cooldown;
+        
+        int32 ExistingIndex = CooldownSlotIndices.Find(SlotIndex);
+        if (ExistingIndex != INDEX_NONE)
+        {
+            CooldownEndTimes[ExistingIndex] = EndTime;
+        }
+        else
+        {
+            CooldownSlotIndices.Add(SlotIndex);
+            CooldownEndTimes.Add(EndTime);
+        }
+        
+        Client_NotifyCooldownStarted(SlotIndex, Slot.AbilityData->Cooldown);
+    }
+}
+
+void UHotbarComponent::StartCooldownAfterCast(int32 SlotIndex)
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return;
+    }
+    
+    FAbilityTableRow AbilityData;
+    if (GetAbilityDataForSlot(SlotIndex, AbilityData) && AbilityData.Cooldown > 0.0f)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        float EndTime = CurrentTime + AbilityData.Cooldown;
+        
+        int32 ExistingIndex = CooldownSlotIndices.Find(SlotIndex);
+        if (ExistingIndex != INDEX_NONE)
+        {
+            CooldownEndTimes[ExistingIndex] = EndTime;
+        }
+        else
+        {
+            CooldownSlotIndices.Add(SlotIndex);
+            CooldownEndTimes.Add(EndTime);
+        }
+        
+        if (GetOwnerRole() == ROLE_Authority)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("SERVER: Sending cooldown notification for slot %d"), SlotIndex);
+            Client_NotifyCooldownStarted(SlotIndex, AbilityData.Cooldown);
+        }
+    }
+}
+
+void UHotbarComponent::Client_NotifyCooldownStarted_Implementation(int32 SlotIndex, float Duration)
+{
+    float CurrentTime = GetWorld()->GetTimeSeconds();
+    float EndTime = CurrentTime + Duration;
+    
+    int32 ExistingIndex = CooldownSlotIndices.Find(SlotIndex);
+    if (ExistingIndex != INDEX_NONE)
+    {
+        CooldownEndTimes[ExistingIndex] = EndTime;
+    }
+    else
+    {
+        CooldownSlotIndices.Add(SlotIndex);
+        CooldownEndTimes.Add(EndTime);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("CLIENT: Received cooldown notification for slot %d, duration %.1f"), 
+           SlotIndex, Duration);
+}
+
+float UHotbarComponent::GetCooldownPercent(int32 SlotIndex) const
+{
+    // Check client-side tracking arrays
+    for (int32 i = 0; i < CooldownSlotIndices.Num(); i++)
+    {
+        if (CooldownSlotIndices[i] == SlotIndex)
+        {
+            float CurrentTime = GetWorld()->GetTimeSeconds();
+            float EndTime = CooldownEndTimes[i];
+            
+            float CooldownDuration = 0.0f;
+            if (SlotIndex >= 0 && SlotIndex < HotbarSlots.Num())
+            {
+                FAbilityTableRow AbilityData;
+                if (GetAbilityDataForSlot(SlotIndex, AbilityData))
+                {
+                    CooldownDuration = AbilityData.Cooldown;
+                }
+            }
+            
+            if (CooldownDuration > 0.0f)
+            {
+                float TimeRemaining = FMath::Max(0.0f, EndTime - CurrentTime);
+                return TimeRemaining / CooldownDuration;
+            }
+        }
+    }
+    
+    return 0.0f;
+}
+
+float UHotbarComponent::GetCooldownStartTime(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num() || !OwnerAbilitySystem)
+    {
+        return 0.0f;
+    }
+    
+    const FHotbarSlot& Slot = HotbarSlots[SlotIndex];
+    if (!Slot.AbilityHandle.IsValid())
+    {
+        return 0.0f;
+    }
+    
+    // Get ability spec to check cooldown
+    FGameplayAbilitySpec* AbilitySpec = OwnerAbilitySystem->FindAbilitySpecFromHandle(Slot.AbilityHandle);
+    if (AbilitySpec)
+    {
+        float TimeRemaining, CooldownDuration;
+        AbilitySpec->Ability->GetCooldownTimeRemainingAndDuration(
+            Slot.AbilityHandle, OwnerAbilitySystem->AbilityActorInfo.Get(), 
+            TimeRemaining, CooldownDuration);
+        
+        if (TimeRemaining > 0.0f && CooldownDuration > 0.0f)
+        {
+            // Calculate when the cooldown started
+            return GetWorld()->GetTimeSeconds() - (CooldownDuration - TimeRemaining);
+        }
+    }
+    
+    return 0.0f;
 }
 
 void UHotbarComponent::ServerActivateAbilityInSlot_Implementation(int32 SlotIndex)
@@ -290,27 +444,46 @@ bool UHotbarComponent::GetAbilityDataForSlot(int32 SlotIndex, FAbilityTableRow& 
 
 bool UHotbarComponent::IsAbilityOnCooldown(int32 SlotIndex) const
 {
-    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num() || !OwnerAbilitySystem)
+    for (int32 i = 0; i < CooldownSlotIndices.Num(); i++)
     {
-        return false;
+        if (CooldownSlotIndices[i] == SlotIndex)
+        {
+            float CurrentTime = GetWorld()->GetTimeSeconds();
+            float EndTime = CooldownEndTimes[i];
+            
+            if (CurrentTime < EndTime)
+            {
+                return true;
+            }
+        }
     }
     
-    const FHotbarSlot& Slot = HotbarSlots[SlotIndex];
-    if (!Slot.AbilityHandle.IsValid())
+    if (GetOwnerRole() == ROLE_Authority && OwnerAbilitySystem && SlotIndex >= 0 && SlotIndex < HotbarSlots.Num())
     {
-        return false;
-    }
-    
-    // Check if ability is on cooldown
-    FGameplayAbilitySpec* AbilitySpec = OwnerAbilitySystem->FindAbilitySpecFromHandle(Slot.AbilityHandle);
-    if (AbilitySpec)
-    {
-        float RemainingTime, CooldownDuration;
-        AbilitySpec->Ability->GetCooldownTimeRemainingAndDuration(
-            Slot.AbilityHandle, OwnerAbilitySystem->AbilityActorInfo.Get(), 
-            RemainingTime, CooldownDuration);
+        const FHotbarSlot& Slot = HotbarSlots[SlotIndex];
+        if (!Slot.AbilityHandle.IsValid())
+        {
+            return false;
+        }
         
-        return RemainingTime > 0.0f;
+        if (Slot.AbilityData && Slot.AbilityData->CooldownTag.IsValid())
+        {
+            bool bHasTag = OwnerAbilitySystem->HasMatchingGameplayTag(Slot.AbilityData->CooldownTag);
+            if (bHasTag)
+            {
+                return true;
+            }
+        }
+        
+        if (Slot.AbilityID > 0)
+        {
+            FName TagName = FName(*FString::Printf(TEXT("Ability.Cooldown.ID.%d"), Slot.AbilityID));
+            FGameplayTag GenericCooldownTag = FGameplayTag::RequestGameplayTag(TagName);
+            if (GenericCooldownTag.IsValid() && OwnerAbilitySystem->HasMatchingGameplayTag(GenericCooldownTag))
+            {
+                return true;
+            }
+        }
     }
     
     return false;
@@ -341,4 +514,142 @@ float UHotbarComponent::GetRemainingCooldown(int32 SlotIndex) const
     }
     
     return 0.0f;
+}
+
+UTexture2D* UHotbarComponent::GetAbilityIconForSlot(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return nullptr;
+    }
+    
+    FAbilityTableRow AbilityData;
+    if (GetAbilityDataForSlot(SlotIndex, AbilityData))
+    {
+        return AbilityData.AbilityIcon;
+    }
+    
+    return nullptr;
+}
+
+FString UHotbarComponent::GetKeybindTextForSlot(int32 SlotIndex) const
+{
+    switch (SlotIndex)
+    {
+        case 0: return TEXT("1");
+        case 1: return TEXT("2");
+        case 2: return TEXT("3");
+        case 3: return TEXT("4");
+        case 4: return TEXT("5");
+        case 5: return TEXT("6");
+        case 6: return TEXT("7");
+        case 7: return TEXT("8");
+        case 8: return TEXT("9");
+        case 9: return TEXT("0");
+        case 10: return TEXT("-");
+        case 11: return TEXT("=");
+        default: return TEXT("");
+    }
+}
+
+bool UHotbarComponent::HasAbilityInSlot(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return false;
+    }
+    
+    return HotbarSlots[SlotIndex].AbilityID > 0 && HotbarSlots[SlotIndex].AbilityHandle.IsValid();
+}
+
+float UHotbarComponent::GetCooldownProgressForSlot(int32 SlotIndex) const
+{
+    if (!HasAbilityInSlot(SlotIndex) || !OwnerAbilitySystem)
+    {
+        return 0.0f;
+    }
+    
+    if (IsOnGlobalCooldown())
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        float TimeElapsed = CurrentTime - GlobalCooldownStartTime;
+        float NormalizedProgress = FMath::Clamp(TimeElapsed / GlobalCooldownDuration, 0.0f, 1.0f);
+        
+        return 1.0f - NormalizedProgress;
+    }
+    
+    float RemainingCooldown = GetRemainingCooldown(SlotIndex);
+    if (RemainingCooldown <= 0.0f)
+    {
+        return 0.0f;
+    }
+    
+    FAbilityTableRow AbilityData;
+    float TotalCooldown = 0.0f;
+    if (GetAbilityDataForSlot(SlotIndex, AbilityData))
+    {
+        TotalCooldown = AbilityData.Cooldown;
+    }
+    
+    if (TotalCooldown <= 0.0f)
+    {
+        return 0.0f;
+    }
+    
+    return FMath::Clamp(RemainingCooldown / TotalCooldown, 0.0f, 1.0f);
+}
+
+FString UHotbarComponent::GetCooldownTextForSlot(int32 SlotIndex) const
+{
+    float RemainingCooldown = GetRemainingCooldown(SlotIndex);
+    
+    if (IsOnGlobalCooldown())
+    {
+        float GCDRemaining = GlobalCooldownDuration - (GetWorld()->GetTimeSeconds() - GlobalCooldownStartTime);
+        if (GCDRemaining > RemainingCooldown)
+        {
+            RemainingCooldown = GCDRemaining;
+        }
+    }
+    
+    if (RemainingCooldown <= 0.0f)
+    {
+        return TEXT("");
+    }
+    
+    if (RemainingCooldown >= 1.0f)
+    {
+        return FString::Printf(TEXT("%.1f"), RemainingCooldown);
+    }
+    else
+    {
+        return FString::Printf(TEXT("%.0f"), RemainingCooldown * 10.0f);
+    }
+}
+
+void UHotbarComponent::NotifyHotbarUIUpdate()
+{
+    OnHotbarUpdated.Broadcast();
+}
+
+void UHotbarComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+    
+    for (int32 i = CooldownSlotIndices.Num() - 1; i >= 0; i--)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        float EndTime = CooldownEndTimes[i];
+        
+        if (CurrentTime >= EndTime)
+        {
+            int32 SlotIndex = CooldownSlotIndices[i];
+            CooldownSlotIndices.RemoveAt(i);
+            CooldownEndTimes.RemoveAt(i);
+            
+            UE_LOG(LogTemp, Warning, TEXT("%s: Cooldown for slot %d has expired"), 
+                   GetOwnerRole() == ROLE_Authority ? TEXT("SERVER") : TEXT("CLIENT"),
+                   SlotIndex);
+        }
+    }
 }

@@ -295,24 +295,17 @@ void AWoWPlayerCharacter::OnRep_PlayerState()
 {
     Super::OnRep_PlayerState();
     
-    UE_LOG(LogTemp, Warning, TEXT("***** OnRep_PlayerState Called *****"));
-    
-    // Get the player state on clients
     AWoWPlayerState* PS = GetPlayerState<AWoWPlayerState>();
     if (PS)
     {
-        // Initialize ability actor info on clients
         UAbilitySystemComponent* ASC = PS->GetAbilitySystemComponent();
         if (ASC)
         {
             ASC->InitAbilityActorInfo(PS, this);
-            UE_LOG(LogTemp, Warning, TEXT("***** Client ASC Actor Info Initialized *****"));
             
-            // Force a refresh of replicated data
             ASC->ForceReplication();
             
-            // Debug any tags that might already be on the ASC
-            FGameplayTagContainer AllGameplayTags; // Changed variable name from Tags to AllGameplayTags
+            FGameplayTagContainer AllGameplayTags;
             ASC->GetOwnedGameplayTags(AllGameplayTags);
             if (AllGameplayTags.Num() > 0)
             {
@@ -335,6 +328,11 @@ void AWoWPlayerCharacter::OnRep_PlayerState()
     else
     {
         UE_LOG(LogTemp, Error, TEXT("OnRep_PlayerState: No PlayerState found!"));
+    }
+    
+    if (HotbarComponent)
+    {
+        HotbarComponent->NotifyHotbarUIUpdate();
     }
 }
 
