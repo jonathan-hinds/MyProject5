@@ -46,45 +46,7 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-public:   
-
-virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
-
-UFUNCTION(BlueprintPure, Category = "Hotbar")
-float GetCooldownPercent(int32 SlotIndex) const;
-
-UFUNCTION(BlueprintCallable, Category = "Hotbar")
-void StartCooldownAfterCast(int32 SlotIndex);
-
-UFUNCTION(Client, Reliable)
-void Client_NotifyCooldownStarted(int32 SlotIndex, float EndTime);
-
-UFUNCTION(Client, Reliable)
-void Client_StartCooldownAfterCast(int32 SlotIndex);
-
-
-    UFUNCTION(BlueprintCallable, Category = "Hotbar")
-    UTexture2D* GetAbilityIconForSlot(int32 SlotIndex) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hotbar")
-    FString GetKeybindTextForSlot(int32 SlotIndex) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hotbar")
-    bool HasAbilityInSlot(int32 SlotIndex) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hotbar")
-    float GetCooldownProgressForSlot(int32 SlotIndex) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hotbar")
-    FString GetCooldownTextForSlot(int32 SlotIndex) const;
-
-    UFUNCTION(BlueprintCallable, Category = "Hotbar")
-    void NotifyHotbarUIUpdate();
-
-    DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnHotbarUpdated);
-
-    UPROPERTY(BlueprintAssignable, Category = "Hotbar")
-    FOnHotbarUpdated OnHotbarUpdated;
+public:    
     // Initialize the hotbar with ability data
     UFUNCTION(BlueprintCallable, Category = "Hotbar")
     void InitializeHotbar(UAbilityDataAsset* DataAsset);
@@ -128,16 +90,6 @@ void Client_StartCooldownAfterCast(int32 SlotIndex);
     float GetGlobalCooldownStartTime() const { return GlobalCooldownStartTime; }
 
 protected:
-bool bProcessingRPC = false;
-// Add these to the private section
-float GetCooldownStartTime(int32 SlotIndex) const;
-
-UPROPERTY(Replicated)
-TArray<int32> CooldownSlotIndices;
-
-UPROPERTY(Replicated)
-TArray<float> CooldownEndTimes;
-
     // The hotbar slots (typically 12)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Hotbar")
     TArray<FHotbarSlot> HotbarSlots;

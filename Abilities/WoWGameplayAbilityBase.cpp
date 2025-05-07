@@ -596,13 +596,18 @@ void UWoWGameplayAbilityBase::ExecuteAbility(const FGameplayAbilitySpecHandle Ha
 
 void UWoWGameplayAbilityBase::OnCastTimeComplete()
 {
+    UE_LOG(LogTemp, Warning, TEXT("==== CAST TIME COMPLETED ===="));
+    
     if (!CurrentActorInfo || !CurrentSpecHandle.IsValid())
     {
+        UE_LOG(LogTemp, Error, TEXT("Invalid actor info or ability handle!"));
         return;
     }
     
+    // Double-check CanActivateAbility again to ensure targeting is still valid
     if (!CanActivateAbility(CurrentSpecHandle, CurrentActorInfo, nullptr, nullptr, nullptr))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Ability can no longer be activated (target lost?)"));
         CancelAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true);
         return;
     }
@@ -610,8 +615,14 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
     FAbilityTableRow AbilityData;
     if (GetAbilityData(AbilityData))
     {
+        UE_LOG(LogTemp, Warning, TEXT("Cast completed for ability: %s"), *AbilityData.DisplayName);
+        
+        // Now that cast is complete, commit the ability and apply effects
         if (CommitAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo))
         {
+            UE_LOG(LogTemp, Warning, TEXT("Ability committed successfully after cast"));
+            
+            // Notify the casting component about completion
             AActor* OwnerActor = CurrentActorInfo->AvatarActor.Get();
             if (OwnerActor)
             {
@@ -625,44 +636,24 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
             ConsumeManaCost(AbilityData.ManaCost, CurrentActorInfo);
             ExecuteGameplayEffects(CurrentActorInfo);
             
+            // Broadcast cast complete event
             OnAbilityCastComplete.Broadcast(AbilityData);
             
-            // Handle cooldown for cast-time abilities
-            AWoWPlayerCharacter* PlayerCharacter = Cast<AWoWPlayerCharacter>(GetAvatarActorFromActorInfo());
-            if (PlayerCharacter)
-            {
-                UHotbarComponent* HotbarComp = PlayerCharacter->GetHotbarComponent();
-                if (HotbarComp)
-                {
-                    int32 FoundSlot = -1;
-                    for (int32 SlotIndex = 0; SlotIndex < 12; SlotIndex++)
-                    {
-                        FAbilityTableRow SlotAbilityData;
-                        if (HotbarComp->GetAbilityDataForSlot(SlotIndex, SlotAbilityData) && 
-                            SlotAbilityData.AbilityID == AbilityID)
-                        {
-                            FoundSlot = SlotIndex;
-                            break;
-                        }
-                    }
-                    
-                    if (FoundSlot != -1)
-                    {
-                        HotbarComp->StartCooldownAfterCast(FoundSlot);
-                    }
-                }
-            }
-            
+            // IMPORTANT CHANGE: Always end the ability regardless of authority
+            // This ensures cooldowns are applied on both server and client
             bool bIsServer = CurrentActorInfo->AbilitySystemComponent->GetOwnerRole() == ROLE_Authority;
+            UE_LOG(LogTemp, Warning, TEXT("Ending ability on %s"), bIsServer ? TEXT("server") : TEXT("client"));
             EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
         }
         else
         {
+            UE_LOG(LogTemp, Error, TEXT("Failed to commit ability after cast completion"));
             EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
         }
     }
     else
     {
+        UE_LOG(LogTemp, Error, TEXT("Failed to get ability data after cast completion"));
         EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
     }
 }
