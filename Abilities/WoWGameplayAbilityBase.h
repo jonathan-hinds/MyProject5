@@ -24,6 +24,9 @@ class MYPROJECT5_API UWoWGameplayAbilityBase : public UGameplayAbility
 public:
     UWoWGameplayAbilityBase();
     
+    UFUNCTION(BlueprintPure, Category = "Ability")
+    int32 GetAbilityID() const { return AbilityID; }
+
     // Override to implement ability logic
     virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle, 
                                 const FGameplayAbilityActorInfo* ActorInfo, 

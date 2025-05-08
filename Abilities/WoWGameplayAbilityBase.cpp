@@ -16,25 +16,45 @@ UWoWGameplayAbilityBase::UWoWGameplayAbilityBase()
     AbilityID = 0;
     bAbilityDataLoaded = false;
     
-    // Find the cooldown effect class
-    static ConstructorHelpers::FClassFinder<UGameplayEffect> CooldownEffectFinder(TEXT("/Game/Abilities/Effects/GE_AbilityCooldown"));
+    // Find the cooldown effect class - now looking for the BP version
+    static ConstructorHelpers::FClassFinder<UGameplayEffect> CooldownEffectFinder(TEXT("/Game/Abilities/Effects/GE_AbilityCooldown_BP"));
     if (CooldownEffectFinder.Succeeded())
     {
         CooldownGameplayEffect = CooldownEffectFinder.Class;
-        UE_LOG(LogTemp, Warning, TEXT("Found cooldown effect: %s"), *CooldownGameplayEffect->GetName());
+        UE_LOG(LogTemp, Warning, TEXT("Found BP cooldown effect: %s"), *CooldownGameplayEffect->GetName());
     }
     else
     {
         // Try to find a different path if the first one fails
-        static ConstructorHelpers::FClassFinder<UGameplayEffect> AlternateFinder(TEXT("/Script/MyProject5.GE_AbilityCooldown"));
+        static ConstructorHelpers::FClassFinder<UGameplayEffect> AlternateFinder(TEXT("/Game/Abilities/GE_AbilityCooldown_BP"));
         if (AlternateFinder.Succeeded())
         {
             CooldownGameplayEffect = AlternateFinder.Class;
-            UE_LOG(LogTemp, Warning, TEXT("Found cooldown effect via alternate path: %s"), *CooldownGameplayEffect->GetName());
+            UE_LOG(LogTemp, Warning, TEXT("Found BP cooldown effect via alternate path: %s"), *CooldownGameplayEffect->GetName());
         }
         else
         {
-            UE_LOG(LogTemp, Error, TEXT("Failed to find cooldown effect class!"));
+            // Fall back to the original C++ version
+            static ConstructorHelpers::FClassFinder<UGameplayEffect> OriginalFinder(TEXT("/Game/Abilities/Effects/GE_AbilityCooldown"));
+            if (OriginalFinder.Succeeded())
+            {
+                CooldownGameplayEffect = OriginalFinder.Class;
+                UE_LOG(LogTemp, Warning, TEXT("Falling back to original cooldown effect: %s"), *CooldownGameplayEffect->GetName());
+            }
+            else
+            {
+                // Last attempt with C++ path
+                static ConstructorHelpers::FClassFinder<UGameplayEffect> LastFinder(TEXT("/Script/MyProject5.GE_AbilityCooldown"));
+                if (LastFinder.Succeeded())
+                {
+                    CooldownGameplayEffect = LastFinder.Class;
+                    UE_LOG(LogTemp, Warning, TEXT("Found original cooldown effect via script path: %s"), *CooldownGameplayEffect->GetName());
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Failed to find any cooldown effect class!"));
+                }
+            }
         }
     }
     
@@ -220,11 +240,8 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
                     {
                         UE_LOG(LogTemp, Warning, TEXT("Created valid cooldown effect spec"));
                         
-                        // CRITICAL FIX: Directly override the Duration property in the spec
-                        SpecHandle.Data->Duration = AbilityData.Cooldown;
-                        
-                        // Set the cooldown duration via SetByCaller as well
-                        FGameplayTag DurationTag = FGameplayTag::RequestGameplayTag(FName("Data.Cooldown"));
+                        // Use the SetByCaller tag defined in the blueprint
+                        FGameplayTag DurationTag = FGameplayTag::RequestGameplayTag(FName("Data.Cooldown.Duration"));
                         SpecHandle.Data->SetSetByCallerMagnitude(DurationTag, AbilityData.Cooldown);
                         
                         UE_LOG(LogTemp, Warning, TEXT("Set cooldown duration to %.1f using tag: %s"), 
@@ -243,6 +260,16 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
                         {
                             UE_LOG(LogTemp, Warning, TEXT("Successfully applied cooldown effect with handle: %s"), 
                                 *ActiveGEHandle.ToString());
+                                
+                            // Debug the actual effect
+                            const FActiveGameplayEffect* ActiveEffect = ActorInfo->AbilitySystemComponent->GetActiveGameplayEffect(ActiveGEHandle);
+                            if (ActiveEffect)
+                            {
+                                UE_LOG(LogTemp, Warning, TEXT("Applied effect duration: %.1f"), ActiveEffect->GetDuration());
+                                
+                                float TimeRemaining = ActiveEffect->GetTimeRemaining(ActorInfo->AbilitySystemComponent->GetWorld()->GetTimeSeconds());
+                                UE_LOG(LogTemp, Warning, TEXT("Initial time remaining: %.1f"), TimeRemaining);
+                            }
                         }
                         else
                         {

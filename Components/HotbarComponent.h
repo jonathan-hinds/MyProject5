@@ -14,6 +14,12 @@ struct FHotbarSlot
 {
     GENERATED_BODY()
     
+    UPROPERTY()
+    float CooldownDuration;
+
+    UPROPERTY()
+    float CooldownEndTime;
+
     // The ability ID associated with this slot
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hotbar")
     int32 AbilityID;

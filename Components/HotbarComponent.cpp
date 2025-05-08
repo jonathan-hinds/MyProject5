@@ -414,10 +414,27 @@ float UHotbarComponent::GetAbilityCooldownRemainingTime(int32 SlotIndex) const
 {
     if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
     {
-        return 0.0f; // Return 0 (no time remaining) if invalid slot
+        return 0.0f;
     }
 
-    // Get ASC from PlayerState directly
+    const FHotbarSlot& Slot = HotbarSlots[SlotIndex];
+    
+    // Check if we have cooldown info for this slot
+    if (Slot.CooldownEndTime > 0.0f)
+    {
+        float CurrentTime = GetWorld()->GetTimeSeconds();
+        float RemainingTime = Slot.CooldownEndTime - CurrentTime;
+        
+        // If cooldown has expired, return 0
+        if (RemainingTime <= 0.0f)
+        {
+            return 0.0f;
+        }
+        
+        return RemainingTime;
+    }
+    
+    // Fallback to previous method if no cooldown info is available
     UAbilitySystemComponent* ASC = nullptr;
     AActor* OwningActor = GetOwner();
     AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
@@ -432,7 +449,7 @@ float UHotbarComponent::GetAbilityCooldownRemainingTime(int32 SlotIndex) const
     
     if (!ASC)
     {
-        return 0.0f; // Return 0 (no time remaining) if no ASC
+        return 0.0f;
     }
 
     // Get all active effects
@@ -455,7 +472,7 @@ float UHotbarComponent::GetAbilityCooldownRemainingTime(int32 SlotIndex) const
         }
     }
     
-    return 0.0f; // Return 0 (no time remaining) if no cooldown effect found
+    return 0.0f;
 }
 
 // Replace LogAllGameplayEffects with this complete implementation
