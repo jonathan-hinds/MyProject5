@@ -342,3 +342,337 @@ float UHotbarComponent::GetRemainingCooldown(int32 SlotIndex) const
     
     return 0.0f;
 }
+
+float UHotbarComponent::GetAbilityCooldownProgress(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return 1.0f; // Return 1.0 (fully cooled down) if invalid slot
+    }
+
+    // Get ASC from PlayerState directly
+    UAbilitySystemComponent* ASC = nullptr;
+    AActor* OwningActor = GetOwner();
+    AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
+    if (PlayerChar)
+    {
+        AWoWPlayerState* PS = PlayerChar->GetPlayerState<AWoWPlayerState>();
+        if (PS)
+        {
+            ASC = PS->GetAbilitySystemComponent();
+        }
+    }
+    
+    if (!ASC)
+    {
+        return 1.0f; // Return 1.0 (fully cooled down) if no ASC
+    }
+
+    // Get all active effects
+    TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
+    
+    // Check if any of these effects is our cooldown effect
+    for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
+    {
+        const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
+        if (Effect && Effect->Spec.Def)
+        {
+            // Check if this is a cooldown effect by name
+            FString EffectName = Effect->Spec.Def->GetName();
+            if (EffectName.Contains("GE_AbilityCooldown"))
+            {
+                // Found a cooldown effect - calculate progress
+                
+                // Get the current game world time
+                float CurrentTime = GetWorld()->GetTimeSeconds();
+                
+                // Get the time remaining
+                float TimeRemaining = Effect->GetTimeRemaining(CurrentTime);
+                
+                // Get the total duration
+                float Duration = Effect->GetDuration();
+                
+                // Handle edge cases
+                if (Duration <= 0.0f)
+                {
+                    return 1.0f; // Avoid division by zero
+                }
+                
+                // Calculate progress (0 = just started, 1 = finished)
+                float Progress = 1.0f - (TimeRemaining / Duration);
+                
+                // Clamp between 0 and 1 for safety
+                return FMath::Clamp(Progress, 0.0f, 1.0f);
+            }
+        }
+    }
+    
+    return 1.0f; // Return 1.0 (fully cooled down) if no cooldown effect found
+}
+
+float UHotbarComponent::GetAbilityCooldownRemainingTime(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return 0.0f; // Return 0 (no time remaining) if invalid slot
+    }
+
+    // Get ASC from PlayerState directly
+    UAbilitySystemComponent* ASC = nullptr;
+    AActor* OwningActor = GetOwner();
+    AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
+    if (PlayerChar)
+    {
+        AWoWPlayerState* PS = PlayerChar->GetPlayerState<AWoWPlayerState>();
+        if (PS)
+        {
+            ASC = PS->GetAbilitySystemComponent();
+        }
+    }
+    
+    if (!ASC)
+    {
+        return 0.0f; // Return 0 (no time remaining) if no ASC
+    }
+
+    // Get all active effects
+    TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
+    
+    // Check if any of these effects is our cooldown effect
+    for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
+    {
+        const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
+        if (Effect && Effect->Spec.Def)
+        {
+            // Check if this is a cooldown effect by name
+            FString EffectName = Effect->Spec.Def->GetName();
+            if (EffectName.Contains("GE_AbilityCooldown"))
+            {
+                // Found a cooldown effect
+                float CurrentTime = GetWorld()->GetTimeSeconds();
+                return Effect->GetTimeRemaining(CurrentTime);
+            }
+        }
+    }
+    
+    return 0.0f; // Return 0 (no time remaining) if no cooldown effect found
+}
+
+// Replace LogAllGameplayEffects with this complete implementation
+void UHotbarComponent::LogAllGameplayEffects() const
+{
+    // Print who owns this component
+    AActor* OwningActor = GetOwner();
+    FString OwnerName = OwningActor ? OwningActor->GetName() : TEXT("None");
+    
+    // Check if we're on server
+    bool bIsServer = OwningActor ? OwningActor->HasAuthority() : false;
+    FString MachineType = bIsServer ? TEXT("SERVER") : TEXT("CLIENT");
+    
+    // Get ASC from PlayerState instead of using the cached OwnerAbilitySystem
+    UAbilitySystemComponent* ASC = nullptr;
+    AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
+    if (PlayerChar)
+    {
+        AWoWPlayerState* PS = PlayerChar->GetPlayerState<AWoWPlayerState>();
+        if (PS)
+        {
+            ASC = PS->GetAbilitySystemComponent();
+        }
+    }
+    
+    if (GEngine)
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, 
+            FString::Printf(TEXT("[%s] LogAllGameplayEffects for %s"), *MachineType, *OwnerName));
+    
+    // Check if ASC is available
+    if (!ASC)
+    {
+        if (GEngine)
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+                FString::Printf(TEXT("[%s] No ASC Available for %s"), *MachineType, *OwnerName));
+        
+        // Check PlayerState
+        if (PlayerChar)
+        {
+            AWoWPlayerState* PS = PlayerChar->GetPlayerState<AWoWPlayerState>();
+            if (!PS)
+            {
+                if (GEngine)
+                    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+                        FString::Printf(TEXT("[%s] No PlayerState Available"), *MachineType));
+            }
+            else
+            {
+                if (GEngine)
+                    GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+                        FString::Printf(TEXT("[%s] Found PlayerState: %s"), *MachineType, *PS->GetName()));
+                        
+                if (!PS->GetAbilitySystemComponent())
+                {
+                    if (GEngine)
+                        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, 
+                            FString::Printf(TEXT("[%s] PlayerState has no ASC"), *MachineType));
+                }
+            }
+        }
+        
+        return;
+    }
+    
+    // Log that we have a valid ASC
+    if (GEngine)
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+            FString::Printf(TEXT("[%s] Found valid ASC for %s"), *MachineType, *OwnerName));
+    
+    // Get all active effects
+    TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
+    
+    if (GEngine)
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, 
+            FString::Printf(TEXT("[%s] Found %d active effects"), *MachineType, ActiveEffects.Num()));
+    
+    // Show details for each active effect
+    for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
+    {
+        const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
+        if (Effect && Effect->Spec.Def)
+        {
+            float TimeRemaining = Effect->GetTimeRemaining(GetWorld()->GetTimeSeconds());
+            
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, 
+                    FString::Printf(TEXT("[%s] Effect: %s (%.1fs remaining)"), 
+                        *MachineType, *Effect->Spec.Def->GetName(), TimeRemaining));
+                
+                // Show all tags on this effect
+                FString TagList = TEXT("Tags: ");
+                for (const FGameplayTag& Tag : Effect->Spec.DynamicGrantedTags)
+                {
+                    TagList += Tag.ToString() + TEXT(" ");
+                }
+                
+                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TagList);
+            }
+        }
+    }
+    
+    // Also check for any gameplay tags on the ASC
+    FGameplayTagContainer OwnedTags;
+    ASC->GetOwnedGameplayTags(OwnedTags);
+    
+    if (GEngine)
+    {
+        FString TagList = TEXT("ASC Tags: ");
+        for (const FGameplayTag& Tag : OwnedTags)
+        {
+            TagList += Tag.ToString() + TEXT(" ");
+        }
+        
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Orange, TagList);
+    }
+}
+
+// Replace IsAbilityOnCooldownByGameplayEffect with this implementation
+bool UHotbarComponent::IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return false;
+    }
+
+    // Get ASC from PlayerState directly
+    UAbilitySystemComponent* ASC = nullptr;
+    AActor* OwningActor = GetOwner();
+    AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
+    if (PlayerChar)
+    {
+        AWoWPlayerState* PS = PlayerChar->GetPlayerState<AWoWPlayerState>();
+        if (PS)
+        {
+            ASC = PS->GetAbilitySystemComponent();
+        }
+    }
+    
+    if (!ASC)
+    {
+        return false;
+    }
+
+    // Get all active effects
+    TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
+    
+    // Check if any of these effects is our cooldown effect
+    for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
+    {
+        const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
+        if (Effect && Effect->Spec.Def)
+        {
+            // Check if this is a cooldown effect by name
+            FString EffectName = Effect->Spec.Def->GetName();
+            if (EffectName.Contains("GE_AbilityCooldown"))
+            {
+                // Found a cooldown effect
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+// Replace IsAbilityOnCooldownByTag with this implementation
+bool UHotbarComponent::IsAbilityOnCooldownByTag(int32 SlotIndex) const
+{
+    if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
+    {
+        return false;
+    }
+
+    // Get ASC from PlayerState instead of using the cached OwnerAbilitySystem
+    UAbilitySystemComponent* ASC = nullptr;
+    AActor* OwningActor = GetOwner();
+    AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
+    if (PlayerChar)
+    {
+        AWoWPlayerState* PS = PlayerChar->GetPlayerState<AWoWPlayerState>();
+        if (PS)
+        {
+            ASC = PS->GetAbilitySystemComponent();
+        }
+    }
+    
+    if (!ASC)
+    {
+        return false;
+    }
+
+    // Get the ability data to find its cooldown tag
+    FAbilityTableRow AbilityData;
+    if (!GetAbilityDataForSlot(SlotIndex, AbilityData))
+    {
+        return false;
+    }
+
+    // Check for ability-specific cooldown tag
+    if (AbilityData.CooldownTag.IsValid())
+    {
+        if (ASC->HasMatchingGameplayTag(AbilityData.CooldownTag))
+        {
+            return true;
+        }
+    }
+
+    // Check for generic cooldown tag format
+    FName TagName = FName(*FString::Printf(TEXT("Ability.Cooldown.ID.%d"), AbilityData.AbilityID));
+    FGameplayTag GenericCooldownTag = FGameplayTag::RequestGameplayTag(TagName, false);
+    if (GenericCooldownTag.IsValid() && ASC->HasMatchingGameplayTag(GenericCooldownTag))
+    {
+        return true;
+    }
+
+    // Fallback to base cooldown tag
+    FGameplayTag BaseCooldownTag = FGameplayTag::RequestGameplayTag(FName("Ability.Cooldown"), false);
+    return ASC->HasMatchingGameplayTag(BaseCooldownTag);
+}

@@ -47,6 +47,23 @@ protected:
     virtual void BeginPlay() override;
 
 public:    
+
+UFUNCTION(BlueprintCallable, Category = "Cooldown")
+float GetAbilityCooldownRemainingTime(int32 SlotIndex) const;
+
+UFUNCTION(BlueprintCallable, Category = "Cooldown")
+float GetAbilityCooldownProgress(int32 SlotIndex) const;
+
+UFUNCTION(BlueprintCallable, Category = "Debug")
+void LogAllGameplayEffects() const;
+
+// These functions should already exist in your header file, but just to be sure:
+UFUNCTION(BlueprintCallable, Category = "Cooldown")
+bool IsAbilityOnCooldownByTag(int32 SlotIndex) const;
+
+UFUNCTION(BlueprintCallable, Category = "Cooldown")
+bool IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) const;
+
     // Initialize the hotbar with ability data
     UFUNCTION(BlueprintCallable, Category = "Hotbar")
     void InitializeHotbar(UAbilityDataAsset* DataAsset);

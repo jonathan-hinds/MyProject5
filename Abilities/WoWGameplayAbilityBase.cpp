@@ -220,7 +220,10 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
                     {
                         UE_LOG(LogTemp, Warning, TEXT("Created valid cooldown effect spec"));
                         
-                        // Set the cooldown duration
+                        // CRITICAL FIX: Directly override the Duration property in the spec
+                        SpecHandle.Data->Duration = AbilityData.Cooldown;
+                        
+                        // Set the cooldown duration via SetByCaller as well
                         FGameplayTag DurationTag = FGameplayTag::RequestGameplayTag(FName("Data.Cooldown"));
                         SpecHandle.Data->SetSetByCallerMagnitude(DurationTag, AbilityData.Cooldown);
                         
