@@ -548,24 +548,7 @@ float UHotbarComponent::GetAbilityCooldownRemainingTime(int32 SlotIndex) const
         return 0.0f;
     }
 
-    const FHotbarSlot& Slot = HotbarSlots[SlotIndex];
-    
-    // Check if we have cooldown info for this slot
-    if (Slot.CooldownEndTime > 0.0f)
-    {
-        float CurrentTime = GetWorld()->GetTimeSeconds();
-        float RemainingTime = Slot.CooldownEndTime - CurrentTime;
-        
-        // If cooldown has expired, return 0
-        if (RemainingTime <= 0.0f)
-        {
-            return 0.0f;
-        }
-        
-        return RemainingTime;
-    }
-    
-    // Fallback to previous method if no cooldown info is available
+    // Get ASC from PlayerState
     UAbilitySystemComponent* ASC = nullptr;
     AActor* OwningActor = GetOwner();
     AWoWPlayerCharacter* PlayerChar = Cast<AWoWPlayerCharacter>(OwningActor);
@@ -583,26 +566,65 @@ float UHotbarComponent::GetAbilityCooldownRemainingTime(int32 SlotIndex) const
         return 0.0f;
     }
 
-    // Get all active effects
+    // Get ability data
+    FAbilityTableRow AbilityData;
+    if (!GetAbilityDataForSlot(SlotIndex, AbilityData))
+    {
+        return 0.0f;
+    }
+
+    // Check for GE-based cooldowns - only return values we can reliably determine
     TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
     
-    // Check if any of these effects is our cooldown effect
     for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
     {
         const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
-        if (Effect && Effect->Spec.Def)
+        if (!Effect || !Effect->Spec.Def)
+            continue;
+            
+        // Check if this effect is possibly a cooldown for our ability
+        bool isPossibleCooldown = Effect->Spec.Def->GetName().Contains("Cooldown");
+        
+        // More thorough check - does it have any tags related to our ability?
+        bool isForOurAbility = false;
+        
+        // If we have a cooldown tag defined, check for that specific tag
+        if (AbilityData.CooldownTag.IsValid())
         {
-            // Check if this is a cooldown effect by name
-            FString EffectName = Effect->Spec.Def->GetName();
-            if (EffectName.Contains("GE_AbilityCooldown"))
+            for (const FGameplayTag& Tag : Effect->Spec.DynamicGrantedTags)
             {
-                // Found a cooldown effect
-                float CurrentTime = GetWorld()->GetTimeSeconds();
-                return Effect->GetTimeRemaining(CurrentTime);
+                if (Tag == AbilityData.CooldownTag)
+                {
+                    isForOurAbility = true;
+                    break;
+                }
             }
+        }
+        
+        // Check for ID-based cooldown tags
+        if (!isForOurAbility)
+        {
+            for (const FGameplayTag& Tag : Effect->Spec.DynamicGrantedTags)
+            {
+                FString TagStr = Tag.ToString();
+                if (TagStr.Contains("Cooldown") && 
+                    TagStr.Contains(FString::Printf(TEXT("ID.%d"), AbilityData.AbilityID)))
+                {
+                    isForOurAbility = true;
+                    break;
+                }
+            }
+        }
+        
+        // If this is a cooldown for our ability, return its remaining time
+        if ((isPossibleCooldown || isForOurAbility) && Effect->GetDuration() > 0.0f)
+        {
+            float CurrentTime = GetWorld()->GetTimeSeconds();
+            return Effect->GetTimeRemaining(CurrentTime);
         }
     }
     
+    // If no specific GE was found, return 0 - we only return values we can reliably determine
     return 0.0f;
 }
 
@@ -730,13 +752,6 @@ bool UHotbarComponent::IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) cons
         return false;
     }
 
-    // Get the ability ID for this slot
-    int32 AbilityID = HotbarSlots[SlotIndex].AbilityID;
-    if (AbilityID <= 0)
-    {
-        return false;
-    }
-
     // Get ASC from PlayerState directly
     UAbilitySystemComponent* ASC = nullptr;
     AActor* OwningActor = GetOwner();
@@ -755,54 +770,76 @@ bool UHotbarComponent::IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) cons
         return false;
     }
 
-    // Get the ability ID tag - IMPORTANT: Create tag if it doesn't exist
-    FGameplayTag AbilityIDTag = FGameplayTag::RequestGameplayTag(FName("Data.AbilityID"), true);
-    if (!AbilityIDTag.IsValid())
+    // Get ability data for the slot
+    FAbilityTableRow AbilityData;
+    if (!GetAbilityDataForSlot(SlotIndex, AbilityData))
     {
-        // This should not happen since we're forcing tag creation with 'true' above,
-        // but just in case
         return false;
     }
 
-    // Get all active effects
+    // PRIMARY METHOD: Check for the direct tag application
+    // This should match how tags are added in WoWGameplayAbilityBase::EndAbility
+    
+    // First check for the ability-specific cooldown tag from the ability data
+    if (AbilityData.CooldownTag.IsValid())
+    {
+        if (ASC->HasMatchingGameplayTag(AbilityData.CooldownTag))
+        {
+            return true;
+        }
+    }
+    
+    // Check for ID-based cooldown tag (fallback if no specific tag in ability data)
+    FGameplayTag IDCooldownTag = FGameplayTag::RequestGameplayTag(
+        FName(*FString::Printf(TEXT("Ability.Cooldown.ID.%d"), AbilityData.AbilityID)), false);
+    
+    if (IDCooldownTag.IsValid() && ASC->HasMatchingGameplayTag(IDCooldownTag))
+    {
+        return true;
+    }
+    
+    // Check for spell name-based cooldown tag (another possible format)
+    FString SpellTagStr = "Ability.Cooldown.Spell.";
+    if (!AbilityData.DisplayName.IsEmpty())
+    {
+        FString SpellName = AbilityData.DisplayName;
+        // Convert spaces to underscores for tag format
+        SpellName.ReplaceInline(TEXT(" "), TEXT("_"));
+        FGameplayTag SpellCooldownTag = FGameplayTag::RequestGameplayTag(
+            FName(*(SpellTagStr + SpellName)), false);
+            
+        if (SpellCooldownTag.IsValid() && ASC->HasMatchingGameplayTag(SpellCooldownTag))
+        {
+            return true;
+        }
+    }
+
+    // SECONDARY METHOD: Check for GE-based cooldowns (backup)
     TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
     
-    // Check if any of these effects is our cooldown effect with matching ability ID
     for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
     {
         const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
-        if (Effect && Effect->Spec.Def)
+        if (!Effect || !Effect->Spec.Def)
+            continue;
+        
+        // Check if this effect has any cooldown tags that match our ability
+        bool hasCooldownForThisAbility = false;
+        
+        for (const FGameplayTag& Tag : Effect->Spec.DynamicGrantedTags)
         {
-            // Check if this is a cooldown effect by name
-            FString EffectName = Effect->Spec.Def->GetName();
-            
-            if (EffectName.Contains("GE_AbilityCooldown"))
+            // If this effect grants our specific cooldown tag
+            if ((AbilityData.CooldownTag.IsValid() && Tag == AbilityData.CooldownTag) ||
+                (IDCooldownTag.IsValid() && Tag == IDCooldownTag))
             {
-                // Check if the ability ID tag exists in this effect
-                float StoredAbilityID = -1.0f;
-                
-                if (Effect->Spec.SetByCallerTagMagnitudes.Contains(AbilityIDTag))
-                {
-                    // Get the ability ID
-                    StoredAbilityID = Effect->Spec.GetSetByCallerMagnitude(AbilityIDTag);
-                    
-                    // Check if it matches our target ID
-                    if (FMath::RoundToInt(StoredAbilityID) == AbilityID)
-                    {
-                        // Found a match! Calculate remaining time for debug info
-                        float RemainingTime = Effect->GetTimeRemaining(GetWorld()->GetTimeSeconds());
-                        
-                        if (GEngine)
-                        {
-                            GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Green,
-                                FString::Printf(TEXT("Ability %d on cooldown: %.1f seconds remaining"), 
-                                AbilityID, RemainingTime));
-                        }
-                        
-                        return true;
-                    }
-                }
+                hasCooldownForThisAbility = true;
+                break;
             }
+        }
+        
+        if (hasCooldownForThisAbility)
+        {
+            return true;
         }
     }
     
