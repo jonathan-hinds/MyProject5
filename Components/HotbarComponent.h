@@ -112,11 +112,17 @@ bool IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) const;
     UFUNCTION(BlueprintPure, Category = "Hotbar")
     float GetGlobalCooldownStartTime() const { return GlobalCooldownStartTime; }
 
+UFUNCTION(BlueprintCallable, Category = "Hotbar")
+bool GetAbilityDataForID(int32 AbilityID, FAbilityTableRow& OutAbilityData) const;
+
 protected:
     // The hotbar slots (typically 12)
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Hotbar")
+    UPROPERTY(ReplicatedUsing = OnRep_HotbarSlots,EditDefaultsOnly, BlueprintReadOnly, Category = "Hotbar")
     TArray<FHotbarSlot> HotbarSlots;
     
+    UFUNCTION()
+    void OnRep_HotbarSlots();
+
     // Reference to ability data asset
     UPROPERTY(Replicated)
     UAbilityDataAsset* AbilityDataAsset;

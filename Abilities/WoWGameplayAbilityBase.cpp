@@ -240,12 +240,29 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
                     {
                         UE_LOG(LogTemp, Warning, TEXT("Created valid cooldown effect spec"));
                         
-                        // Use the SetByCaller tag defined in the blueprint
-                        FGameplayTag DurationTag = FGameplayTag::RequestGameplayTag(FName("Data.Cooldown.Duration"));
+                        // CRITICAL FIX: Directly override the Duration property in the spec
+                        SpecHandle.Data->Duration = AbilityData.Cooldown;
+                        
+                        // Set the cooldown duration via SetByCaller as well
+                        FGameplayTag DurationTag = FGameplayTag::RequestGameplayTag(FName("Data.Cooldown"));
                         SpecHandle.Data->SetSetByCallerMagnitude(DurationTag, AbilityData.Cooldown);
                         
                         UE_LOG(LogTemp, Warning, TEXT("Set cooldown duration to %.1f using tag: %s"), 
                             AbilityData.Cooldown, *DurationTag.ToString());
+                        
+                        // NEW: Create and add ability ID tag for SetByCaller
+                        FGameplayTag AbilityIDTag = FGameplayTag::RequestGameplayTag(FName("Data.AbilityID"), true);
+                        SpecHandle.Data->SetSetByCallerMagnitude(AbilityIDTag, static_cast<float>(AbilityID));
+                        
+                        // Print debug information to screen and log
+                        UE_LOG(LogTemp, Warning, TEXT("Set ability ID %d via SetByCaller with tag %s"), 
+                            AbilityID, *AbilityIDTag.ToString());
+                            
+                        if (GEngine)
+                        {
+                            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+                                FString::Printf(TEXT("Added AbilityID: %d to cooldown effect"), AbilityID));
+                        }
                         
                         // Add the cooldown tag to the granted tags
                         SpecHandle.Data->DynamicGrantedTags.AddTag(CooldownTag);
@@ -261,19 +278,21 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
                             UE_LOG(LogTemp, Warning, TEXT("Successfully applied cooldown effect with handle: %s"), 
                                 *ActiveGEHandle.ToString());
                                 
-                            // Debug the actual effect
-                            const FActiveGameplayEffect* ActiveEffect = ActorInfo->AbilitySystemComponent->GetActiveGameplayEffect(ActiveGEHandle);
-                            if (ActiveEffect)
+                            if (GEngine)
                             {
-                                UE_LOG(LogTemp, Warning, TEXT("Applied effect duration: %.1f"), ActiveEffect->GetDuration());
-                                
-                                float TimeRemaining = ActiveEffect->GetTimeRemaining(ActorInfo->AbilitySystemComponent->GetWorld()->GetTimeSeconds());
-                                UE_LOG(LogTemp, Warning, TEXT("Initial time remaining: %.1f"), TimeRemaining);
+                                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+                                    FString::Printf(TEXT("Cooldown effect applied for ability %d"), AbilityID));
                             }
                         }
                         else
                         {
                             UE_LOG(LogTemp, Error, TEXT("Failed to apply cooldown effect for ability %d"), AbilityID);
+                            
+                            if (GEngine)
+                            {
+                                GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                                    FString::Printf(TEXT("Failed to apply cooldown for ability %d"), AbilityID));
+                            }
                         }
                     }
                     else

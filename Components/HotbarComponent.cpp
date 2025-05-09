@@ -18,11 +18,89 @@ UHotbarComponent::UHotbarComponent()
     GlobalCooldownStartTime = -GlobalCooldownDuration;
 }
 
+// In HotbarComponent.cpp
+void UHotbarComponent::OnRep_HotbarSlots()
+{
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+            TEXT("HotbarSlots replicated to client!"));
+    }
+    
+    // Debug info - safely print without dereferencing pointers
+    for (int32 i = 0; i < HotbarSlots.Num(); ++i)
+    {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+                FString::Printf(TEXT("Slot %d: ID=%d, Handle=%s"), 
+                i, HotbarSlots[i].AbilityID,
+                HotbarSlots[i].AbilityHandle.IsValid() ? TEXT("Valid") : TEXT("Invalid")));
+        }
+    }
+    
+    // Safely update AbilityData pointers after replication
+    // This is important because pointers don't replicate
+    if (AbilityDataAsset)
+    {
+        for (int32 i = 0; i < HotbarSlots.Num(); ++i)
+        {
+            // Clear any existing pointer first
+            HotbarSlots[i].AbilityData = nullptr;
+            
+            if (HotbarSlots[i].AbilityID > 0)
+            {
+                // Use a temporary stack variable so we don't dereference a bad pointer
+                static TArray<FAbilityTableRow*> AllRows;
+                if (AllRows.Num() == 0 && AbilityDataAsset->AbilityDataTable)
+                {
+                    AbilityDataAsset->AbilityDataTable->GetAllRows<FAbilityTableRow>(TEXT("OnRep_HotbarSlots"), AllRows);
+                }
+                
+                // Find the row with the matching ID
+                for (FAbilityTableRow* Row : AllRows)
+                {
+                    if (Row && Row->AbilityID == HotbarSlots[i].AbilityID)
+                    {
+                        HotbarSlots[i].AbilityData = Row;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (GEngine)
+    {
+        if (AbilityDataAsset)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+                TEXT("AbilityDataAsset is available on client"));
+        }
+        else
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                TEXT("AbilityDataAsset is NOT available on client!"));
+        }
+    }
+}
+
+bool UHotbarComponent::GetAbilityDataForID(int32 AbilityID, FAbilityTableRow& OutAbilityData) const
+{
+    if (!AbilityDataAsset || AbilityID <= 0)
+    {
+        return false;
+    }
+    
+    return AbilityDataAsset->GetAbilityDataByID(AbilityID, OutAbilityData);
+}
+
 void UHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
     
     DOREPLIFETIME(UHotbarComponent, AbilityDataAsset);
+    DOREPLIFETIME(UHotbarComponent, HotbarSlots);  // Add this line
 }
 
 void UHotbarComponent::BeginPlay()
@@ -204,6 +282,20 @@ void UHotbarComponent::GrantAbilityToOwner(int32 SlotIndex, const FAbilityTableR
 
 void UHotbarComponent::ActivateAbilityInSlot(int32 SlotIndex)
 {
+    // Debug info to understand what we know at activation time
+    bool bIsServer = GetOwnerRole() == ROLE_Authority;
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+            FString::Printf(TEXT("[%s] Activating slot %d, ID=%d, Handle=%s"), 
+            bIsServer ? TEXT("SERVER") : TEXT("CLIENT"),
+            SlotIndex, 
+            (SlotIndex >= 0 && SlotIndex < HotbarSlots.Num()) ? HotbarSlots[SlotIndex].AbilityID : -1,
+            (SlotIndex >= 0 && SlotIndex < HotbarSlots.Num() && HotbarSlots[SlotIndex].AbilityHandle.IsValid()) ? 
+                TEXT("Valid") : TEXT("Invalid")));
+    }
+    
     // If we're not the server, call the server RPC
     if (GetOwnerRole() < ROLE_Authority)
     {
@@ -213,6 +305,12 @@ void UHotbarComponent::ActivateAbilityInSlot(int32 SlotIndex)
     
     if (SlotIndex < 0 || SlotIndex >= HotbarSlots.Num())
     {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                FString::Printf(TEXT("[%s] Invalid slot index: %d"), 
+                bIsServer ? TEXT("SERVER") : TEXT("CLIENT"), SlotIndex));
+        }
         return;
     }
     
@@ -232,28 +330,61 @@ void UHotbarComponent::ActivateAbilityInSlot(int32 SlotIndex)
     
     if (!OwnerAbilitySystem)
     {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                FString::Printf(TEXT("[%s] No AbilitySystemComponent found"), 
+                bIsServer ? TEXT("SERVER") : TEXT("CLIENT")));
+        }
         return;
     }
     
     const FHotbarSlot& Slot = HotbarSlots[SlotIndex];
     if (!Slot.AbilityData)
     {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                FString::Printf(TEXT("[%s] No AbilityData for slot %d"), 
+                bIsServer ? TEXT("SERVER") : TEXT("CLIENT"), SlotIndex));
+        }
         return;
     }
     
     if (!Slot.AbilityHandle.IsValid())
     {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red,
+                FString::Printf(TEXT("[%s] Invalid AbilityHandle for slot %d"), 
+                bIsServer ? TEXT("SERVER") : TEXT("CLIENT"), SlotIndex));
+        }
         return;
     }
     
     // Check global cooldown
     if (Slot.AbilityData->bUsesGlobalCooldown && IsOnGlobalCooldown())
     {
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow,
+                FString::Printf(TEXT("[%s] Ability on global cooldown"), 
+                bIsServer ? TEXT("SERVER") : TEXT("CLIENT")));
+        }
         return;
     }
     
     // Try to activate ability
     bool bSuccess = OwnerAbilitySystem->TryActivateAbility(Slot.AbilityHandle);
+    
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green,
+            FString::Printf(TEXT("[%s] Activation %s for ability ID=%d"), 
+            bIsServer ? TEXT("SERVER") : TEXT("CLIENT"),
+            bSuccess ? TEXT("SUCCEEDED") : TEXT("FAILED"),
+            Slot.AbilityID));
+    }
     
     // If successful and ability uses GCD, trigger it
     if (bSuccess && Slot.AbilityData->bUsesGlobalCooldown)
@@ -599,6 +730,13 @@ bool UHotbarComponent::IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) cons
         return false;
     }
 
+    // Get the ability ID for this slot
+    int32 AbilityID = HotbarSlots[SlotIndex].AbilityID;
+    if (AbilityID <= 0)
+    {
+        return false;
+    }
+
     // Get ASC from PlayerState directly
     UAbilitySystemComponent* ASC = nullptr;
     AActor* OwningActor = GetOwner();
@@ -617,10 +755,19 @@ bool UHotbarComponent::IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) cons
         return false;
     }
 
+    // Get the ability ID tag - IMPORTANT: Create tag if it doesn't exist
+    FGameplayTag AbilityIDTag = FGameplayTag::RequestGameplayTag(FName("Data.AbilityID"), true);
+    if (!AbilityIDTag.IsValid())
+    {
+        // This should not happen since we're forcing tag creation with 'true' above,
+        // but just in case
+        return false;
+    }
+
     // Get all active effects
     TArray<FActiveGameplayEffectHandle> ActiveEffects = ASC->GetActiveEffects(FGameplayEffectQuery());
     
-    // Check if any of these effects is our cooldown effect
+    // Check if any of these effects is our cooldown effect with matching ability ID
     for (const FActiveGameplayEffectHandle& Handle : ActiveEffects)
     {
         const FActiveGameplayEffect* Effect = ASC->GetActiveGameplayEffect(Handle);
@@ -628,10 +775,33 @@ bool UHotbarComponent::IsAbilityOnCooldownByGameplayEffect(int32 SlotIndex) cons
         {
             // Check if this is a cooldown effect by name
             FString EffectName = Effect->Spec.Def->GetName();
+            
             if (EffectName.Contains("GE_AbilityCooldown"))
             {
-                // Found a cooldown effect
-                return true;
+                // Check if the ability ID tag exists in this effect
+                float StoredAbilityID = -1.0f;
+                
+                if (Effect->Spec.SetByCallerTagMagnitudes.Contains(AbilityIDTag))
+                {
+                    // Get the ability ID
+                    StoredAbilityID = Effect->Spec.GetSetByCallerMagnitude(AbilityIDTag);
+                    
+                    // Check if it matches our target ID
+                    if (FMath::RoundToInt(StoredAbilityID) == AbilityID)
+                    {
+                        // Found a match! Calculate remaining time for debug info
+                        float RemainingTime = Effect->GetTimeRemaining(GetWorld()->GetTimeSeconds());
+                        
+                        if (GEngine)
+                        {
+                            GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Green,
+                                FString::Printf(TEXT("Ability %d on cooldown: %.1f seconds remaining"), 
+                                AbilityID, RemainingTime));
+                        }
+                        
+                        return true;
+                    }
+                }
             }
         }
     }
