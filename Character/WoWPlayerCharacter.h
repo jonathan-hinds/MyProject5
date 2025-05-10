@@ -31,6 +31,19 @@ public:
     // Called to bind functionality to input
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
+    void ZoomIn();
+    void ZoomOut();
+
+    // Set minimum and maximum camera distance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float MinCameraDistance = 150.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float MaxCameraDistance = 800.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    float CameraZoomStep = 50.0f;
+
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;

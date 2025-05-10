@@ -15,39 +15,47 @@
 #include "Engine/Engine.h"
 
 
+// Replace your existing AWoWPlayerCharacter constructor in WoWPlayerCharacter.cpp:
+
 AWoWPlayerCharacter::AWoWPlayerCharacter()
 {
     // Set size for collision capsule
     GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
     
     // Configure character movement
-    GetCharacterMovement()->bOrientRotationToMovement = true;  // Character moves in the direction of input...
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);  // ...at this rotation rate
+    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
     GetCharacterMovement()->JumpZVelocity = 600.f;
     GetCharacterMovement()->AirControl = 0.2f;
     
     // Create a camera boom (pulls in towards the player if there is a collision)
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 300.0f;  // The camera follows at this distance behind the character
-    CameraBoom->bUsePawnControlRotation = true;  // Rotate the arm based on the controller
+    CameraBoom->TargetArmLength = 400.0f;
+    CameraBoom->bUsePawnControlRotation = true;
+    CameraBoom->bDoCollisionTest = true;
+    CameraBoom->ProbeSize = 50.0f;
+    CameraBoom->bEnableCameraLag = true;
+    CameraBoom->CameraLagSpeed = 15.0f;
+    CameraBoom->CameraRotationLagSpeed = 10.0f;
+    CameraBoom->bEnableCameraRotationLag = true;
+    CameraBoom->ProbeChannel = ECC_Camera;
     
     // Create a follow camera
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
-    FollowCamera->bUsePawnControlRotation = false;  // Camera does not rotate relative to arm
+    FollowCamera->bUsePawnControlRotation = false;
+    FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
     
     // Create a temporary mesh for testing
     CharacterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CharacterMesh"));
     CharacterMesh->SetupAttachment(RootComponent);
-    CharacterMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));  // Position the mesh correctly
+    CharacterMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
     
     // Create targeting component
     TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
     HotbarComponent = CreateDefaultSubobject<UHotbarComponent>(TEXT("HotbarComponent"));
     CastingComponent = CreateDefaultSubobject<UCastingComponent>(TEXT("CastingComponent"));
-
-    // Note: The skeletal mesh and animation blueprint references will be set in the editor
     
     // Don't rotate character to camera direction
     bUseControllerRotationPitch = false;
@@ -59,6 +67,28 @@ void AWoWPlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
 }
+
+// Add these new functions to WoWPlayerCharacter.cpp:
+
+void AWoWPlayerCharacter::ZoomIn()
+{
+    if (CameraBoom)
+    {
+        float NewTargetArmLength = FMath::Max(CameraBoom->TargetArmLength - CameraZoomStep, MinCameraDistance);
+        CameraBoom->TargetArmLength = NewTargetArmLength;
+    }
+}
+
+void AWoWPlayerCharacter::ZoomOut()
+{
+    if (CameraBoom)
+    {
+        float NewTargetArmLength = FMath::Min(CameraBoom->TargetArmLength + CameraZoomStep, MaxCameraDistance);
+        CameraBoom->TargetArmLength = NewTargetArmLength;
+    }
+}
+
+// Replace your existing SetupPlayerInputComponent function in WoWPlayerCharacter.cpp:
 
 void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -93,6 +123,10 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
     PlayerInputComponent->BindAction("HotbarSlot10", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot10);
     PlayerInputComponent->BindAction("HotbarSlot11", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot11);
     PlayerInputComponent->BindAction("HotbarSlot12", IE_Pressed, this, &AWoWPlayerCharacter::OnHotbarSlot12);
+    
+    // Camera zoom bindings
+    PlayerInputComponent->BindAction("ZoomIn", IE_Pressed, this, &AWoWPlayerCharacter::ZoomIn);
+    PlayerInputComponent->BindAction("ZoomOut", IE_Pressed, this, &AWoWPlayerCharacter::ZoomOut);
 }
 
 void AWoWPlayerCharacter::MoveForward(float Value)
