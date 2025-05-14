@@ -22,6 +22,8 @@ public:
     AWoWPlayerCharacter();
     virtual void Tick(float DeltaTime) override;
 
+    virtual void Jump() override;
+
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_ApplyAbilityEffect(int32 AbilityID, AActor* Target);
 

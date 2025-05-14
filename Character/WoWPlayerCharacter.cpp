@@ -131,6 +131,15 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 
 void AWoWPlayerCharacter::MoveForward(float Value)
 {
+    // Check if we're casting and can't move while casting
+    UCastingComponent* CastComp = GetCastingComponent();
+    if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
+    {
+        // Interrupt the cast due to movement
+        CastComp->NotifyCastInterrupted();
+    }
+
+    // Continue with normal movement
     if ((Controller != nullptr) && (Value != 0.0f))
     {
         // Find out which way is forward
@@ -170,8 +179,31 @@ void AWoWPlayerCharacter::HandleHotbarSlot(int32 SlotIndex)
     }
 }
 
+void AWoWPlayerCharacter::Jump()
+{
+    // Check if we're casting and can't move while casting
+    UCastingComponent* CastComp = GetCastingComponent();
+    if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving())
+    {
+        // Interrupt the cast due to movement
+        CastComp->NotifyCastInterrupted();
+        return; // Don't jump
+    }
+
+    // Perform the regular jump
+    Super::Jump();
+}
+
 void AWoWPlayerCharacter::MoveRight(float Value)
 {
+    // Check if we're casting and can't move while casting
+    UCastingComponent* CastComp = GetCastingComponent();
+    if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
+    {
+        // Interrupt the cast due to movement
+        CastComp->NotifyCastInterrupted();
+    }
+
     if ((Controller != nullptr) && (Value != 0.0f))
     {
         // Find out which way is right

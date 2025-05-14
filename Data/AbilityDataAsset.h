@@ -65,6 +65,10 @@ struct FAbilityTableRow : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cast")
     float CastTime;
     
+    // Can this ability be cast while moving?
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Cast")
+    bool bCanCastWhileMoving;
+    
     // Maximum range (0 for melee/self)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Range")
     float MaxRange;
@@ -80,8 +84,6 @@ struct FAbilityTableRow : public FTableRowBase
     // Default hotbar slot (1-12)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI")
     int32 DefaultHotbarSlot;
-    
-    // NEW FIELDS FOR EFFECTS SYSTEM
     
     // Effects to apply on self when ability activates
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Effects")
@@ -110,6 +112,7 @@ struct FAbilityTableRow : public FTableRowBase
         , ManaCost(0.0f)
         , Cooldown(0.0f)
         , CastTime(0.0f)
+        , bCanCastWhileMoving(false) // Default to false, most abilities can't be cast while moving
         , MaxRange(0.0f)
         , bUsesGlobalCooldown(true)
         , DefaultHotbarSlot(0)

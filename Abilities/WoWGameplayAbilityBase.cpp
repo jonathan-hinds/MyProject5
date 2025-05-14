@@ -134,8 +134,24 @@ void UWoWGameplayAbilityBase::EndAbility(const FGameplayAbilitySpecHandle Handle
     UE_LOG(LogTemp, Warning, TEXT("===== ENDING ABILITY %d ====="), AbilityID);
     UE_LOG(LogTemp, Warning, TEXT("Was Cancelled: %s"), bWasCancelled ? TEXT("YES") : TEXT("NO"));
     
-    // Skip cooldown if the ability was cancelled
-    if (!bWasCancelled && ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
+    // Skip cooldown if the ability was cancelled OR if the cast was interrupted
+    bool bSkipCooldown = bWasCancelled;
+    
+    // Check if the ability was interrupted due to casting
+    UCastingComponent* CastingComp = nullptr;
+    if (ActorInfo && ActorInfo->AvatarActor.IsValid())
+    {
+        CastingComp = ActorInfo->AvatarActor->FindComponentByClass<UCastingComponent>();
+        if (CastingComp && CastingComp->WasCastInterrupted())
+        {
+            // If the cast was interrupted, skip the cooldown
+            UE_LOG(LogTemp, Warning, TEXT("Cast was interrupted, skipping cooldown"));
+            bSkipCooldown = true;
+        }
+    }
+    
+    // Only apply cooldown if the ability wasn't cancelled and wasn't interrupted
+    if (!bSkipCooldown && ActorInfo && ActorInfo->AbilitySystemComponent.IsValid())
     {
         // Get ability data for cooldown info
         FAbilityTableRow AbilityData;
@@ -567,7 +583,15 @@ void UWoWGameplayAbilityBase::ActivateAbility(const FGameplayAbilitySpecHandle H
                 UCastingComponent* CastingComp = OwnerActor->FindComponentByClass<UCastingComponent>();
                 if (CastingComp)
                 {
-                    bool bCanCastWhileMoving = AbilityTags.HasTag(FGameplayTag::RequestGameplayTag(FName("Ability.CanCastWhileMoving")));
+                    // Check if this ability can be cast while moving
+                    bool bCanCastWhileMoving = false;
+                    
+                    // Check ability data for this flag
+                    if (AbilityData.bCanCastWhileMoving)
+                    {
+                        bCanCastWhileMoving = true;
+                    }
+                    
                     CastingComp->NotifyCastStarted(AbilityData.DisplayName, AbilityData.CastTime, bCanCastWhileMoving);
                 }
             }
@@ -653,6 +677,24 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
         return;
     }
     
+    // Get the casting component to check if casting was interrupted
+    UCastingComponent* CastingComp = nullptr;
+    AActor* OwnerActor = CurrentActorInfo->AvatarActor.Get();
+    if (OwnerActor)
+    {
+        CastingComp = OwnerActor->FindComponentByClass<UCastingComponent>();
+    }
+    
+    // Check if the casting was interrupted - if so, don't complete the ability
+    if (CastingComp && CastingComp->WasCastInterrupted())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Ability casting was interrupted - not completing!"));
+        
+        // End ability with cancelled = true
+        EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+        return;
+    }
+    
     // Double-check CanActivateAbility again to ensure targeting is still valid
     if (!CanActivateAbility(CurrentSpecHandle, CurrentActorInfo, nullptr, nullptr, nullptr))
     {
@@ -672,14 +714,9 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
             UE_LOG(LogTemp, Warning, TEXT("Ability committed successfully after cast"));
             
             // Notify the casting component about completion
-            AActor* OwnerActor = CurrentActorInfo->AvatarActor.Get();
-            if (OwnerActor)
+            if (CastingComp)
             {
-                UCastingComponent* CastingComp = OwnerActor->FindComponentByClass<UCastingComponent>();
-                if (CastingComp)
-                {
-                    CastingComp->NotifyCastCompleted();
-                }
+                CastingComp->NotifyCastCompleted();
             }
             
             ConsumeManaCost(AbilityData.ManaCost, CurrentActorInfo);
@@ -688,8 +725,7 @@ void UWoWGameplayAbilityBase::OnCastTimeComplete()
             // Broadcast cast complete event
             OnAbilityCastComplete.Broadcast(AbilityData);
             
-            // IMPORTANT CHANGE: Always end the ability regardless of authority
-            // This ensures cooldowns are applied on both server and client
+            // End the ability (not cancelled)
             bool bIsServer = CurrentActorInfo->AbilitySystemComponent->GetOwnerRole() == ROLE_Authority;
             UE_LOG(LogTemp, Warning, TEXT("Ending ability on %s"), bIsServer ? TEXT("server") : TEXT("client"));
             EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);

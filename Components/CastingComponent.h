@@ -32,14 +32,21 @@ public:
     UFUNCTION(BlueprintPure, Category = "Casting")
     bool IsCasting() const;
     
+    UFUNCTION(BlueprintCallable, Category = "Casting")
+    bool WasCastInterrupted() const { return CastingState == ECastingState::Interrupted; }
+
+    // Add this function for the interrupted overlay
     UFUNCTION(BlueprintPure, Category = "Casting")
-    bool WasInterrupted() const;
+    bool IsInterrupted() const;
     
     UFUNCTION(BlueprintPure, Category = "Casting")
     FString GetSpellName() const;
     
     UFUNCTION(BlueprintPure, Category = "Casting")
     float GetCastProgress() const;
+    
+    UFUNCTION(BlueprintPure, Category = "Casting")
+    bool CanCastWhileMoving() const { return bCanCastWhileMoving; }
 
 protected:
     virtual void BeginPlay() override;
@@ -57,7 +64,13 @@ protected:
     void OnRep_CastingState();
     
     UFUNCTION()
-    void ResetAfterInterrupt();
+    void ClearInterruptState();
+    
+    // Check if the owning character is moving
+    bool IsOwnerMoving() const;
+    
+    // Get the owning character's velocity magnitude
+    float GetOwnerVelocityMagnitude() const;
 
 private:
     UPROPERTY(ReplicatedUsing = OnRep_CastingState)
@@ -76,8 +89,23 @@ private:
     UPROPERTY(Replicated)
     bool bCanCastWhileMoving;
     
-    FTimerHandle InterruptResetTimer;
+    // Flag to track if we're showing the interrupted state
+    UPROPERTY(Replicated)
+    bool bShowingInterrupted;
+    
+    // Movement threshold for interrupting casts (in unreal units per second)
+    UPROPERTY(EditDefaultsOnly, Category = "Casting")
+    float MovementInterruptThreshold;
+    
+    // Previous position for movement detection
+    FVector PreviousLocation;
+    
+    // Timer handle for clearing the interrupted state
+    FTimerHandle InterruptTimerHandle;
     
     float GetWorldTime() const;
     void UpdateClientCastProgress(float DeltaTime);
+    
+    // Check for movement interrupt
+    void CheckMovementInterrupt();
 };
