@@ -19,16 +19,14 @@
 
 AWoWPlayerCharacter::AWoWPlayerCharacter()
 {
-    // Set size for collision capsule
     GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
     
-    // Configure character movement
-    GetCharacterMovement()->bOrientRotationToMovement = true;
+    GetCharacterMovement()->bOrientRotationToMovement = false;
+    GetCharacterMovement()->bUseControllerDesiredRotation = false;
     GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
     GetCharacterMovement()->JumpZVelocity = 600.f;
     GetCharacterMovement()->AirControl = 0.2f;
     
-    // Create a camera boom (pulls in towards the player if there is a collision)
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->TargetArmLength = 400.0f;
@@ -41,26 +39,26 @@ AWoWPlayerCharacter::AWoWPlayerCharacter()
     CameraBoom->bEnableCameraRotationLag = true;
     CameraBoom->ProbeChannel = ECC_Camera;
     
-    // Create a follow camera
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
     FollowCamera->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
     
-    // Create a temporary mesh for testing
     CharacterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CharacterMesh"));
     CharacterMesh->SetupAttachment(RootComponent);
     CharacterMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
     
-    // Create targeting component
     TargetingComponent = CreateDefaultSubobject<UTargetingComponent>(TEXT("TargetingComponent"));
     HotbarComponent = CreateDefaultSubobject<UHotbarComponent>(TEXT("HotbarComponent"));
     CastingComponent = CreateDefaultSubobject<UCastingComponent>(TEXT("CastingComponent"));
     
-    // Don't rotate character to camera direction
     bUseControllerRotationPitch = false;
-    bUseControllerRotationYaw = false;
+    bUseControllerRotationYaw = true;
     bUseControllerRotationRoll = false;
+    
+    MinCameraDistance = 150.0f;
+    MaxCameraDistance = 800.0f;
+    CameraZoomStep = 50.0f;
 }
 
 void AWoWPlayerCharacter::BeginPlay()
@@ -131,22 +129,16 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 
 void AWoWPlayerCharacter::MoveForward(float Value)
 {
-    // Check if we're casting and can't move while casting
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
     {
-        // Interrupt the cast due to movement
         CastComp->NotifyCastInterrupted();
     }
 
-    // Continue with normal movement
     if ((Controller != nullptr) && (Value != 0.0f))
     {
-        // Find out which way is forward
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
-        
-        // Get forward vector
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         AddMovementInput(Direction, Value);
     }
@@ -181,36 +173,28 @@ void AWoWPlayerCharacter::HandleHotbarSlot(int32 SlotIndex)
 
 void AWoWPlayerCharacter::Jump()
 {
-    // Check if we're casting and can't move while casting
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving())
     {
-        // Interrupt the cast due to movement
         CastComp->NotifyCastInterrupted();
-        return; // Don't jump
+        return;
     }
 
-    // Perform the regular jump
     Super::Jump();
 }
 
 void AWoWPlayerCharacter::MoveRight(float Value)
 {
-    // Check if we're casting and can't move while casting
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
     {
-        // Interrupt the cast due to movement
         CastComp->NotifyCastInterrupted();
     }
 
     if ((Controller != nullptr) && (Value != 0.0f))
     {
-        // Find out which way is right
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
-        
-        // Get right vector 
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
         AddMovementInput(Direction, Value);
     }

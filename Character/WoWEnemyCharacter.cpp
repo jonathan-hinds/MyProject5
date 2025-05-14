@@ -11,33 +11,30 @@
 
 AWoWEnemyCharacter::AWoWEnemyCharacter()
 {
-    // Create pawn sensing component
     PawnSensingComponent = CreateDefaultSubobject<UPawnSensingComponent>(TEXT("PawnSensingComponent"));
     
-    // Create ability system component
     AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
     AbilitySystemComponent->SetIsReplicated(true);
     AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 
-    // Create the attribute set
     AttributeSet = CreateDefaultSubobject<UWoWAttributeSet>(TEXT("AttributeSet"));
     
-    // Create a static mesh component for the enemy's visual representation
     UStaticMeshComponent* MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
     MeshComponent->SetupAttachment(RootComponent);
     MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
     
-    // Default values
     Level = 1;
     EnemyType = EEnemyType::Melee;
     WeaponDamageRange = FVector2D(5.0f, 7.0f);
     SightRadius = 800.0f;
     
-    // Configure character movement
     GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.0f, 600.0f, 0.0f);
+    GetCharacterMovement()->RotationRate = FRotator(0.0f, 150.0f, 0.0f);
     
-    // Configure AI controller class
+    bUseControllerRotationPitch = false;
+    bUseControllerRotationYaw = false;
+    bUseControllerRotationRoll = false;
+    
     AIControllerClass = AWoWEnemyController::StaticClass();
     AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 }

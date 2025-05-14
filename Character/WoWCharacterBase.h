@@ -23,6 +23,15 @@ class MYPROJECT5_API AWoWCharacterBase : public ACharacter, public IAbilitySyste
 public:
     AWoWCharacterBase();
 
+UFUNCTION(BlueprintCallable, Category = "Animation")
+float GetMovementDirection() const;
+
+UFUNCTION(BlueprintCallable, Category = "Animation")
+float GetMovementSpeed() const;
+
+UFUNCTION(BlueprintCallable, Category = "Animation")
+bool IsMoving() const;
+
     // Called every frame
     virtual void Tick(float DeltaTime) override;
 

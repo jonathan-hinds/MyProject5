@@ -113,6 +113,39 @@ void AWoWCharacterBase::ApplyStartupEffects()
     // Apply any startup gameplay effects here
 }
 
+float AWoWCharacterBase::GetMovementDirection() const
+{
+    const FVector ForwardVector = GetActorForwardVector();
+    const FVector RightVector = GetActorRightVector();
+    
+    const FVector Velocity = GetVelocity();
+    
+    if (Velocity.SizeSquared2D() < 1.0f)
+    {
+        return 0.0f;
+    }
+    
+    const FVector VelocityNormalized = Velocity.GetSafeNormal2D();
+    
+    const float ForwardAmount = FVector::DotProduct(ForwardVector, VelocityNormalized);
+    const float RightAmount = FVector::DotProduct(RightVector, VelocityNormalized);
+    
+    const float AngleRadians = FMath::Atan2(RightAmount, ForwardAmount);
+    const float AngleDegrees = FMath::RadiansToDegrees(AngleRadians);
+    
+    return AngleDegrees;
+}
+
+float AWoWCharacterBase::GetMovementSpeed() const
+{
+    return GetVelocity().Size2D();
+}
+
+bool AWoWCharacterBase::IsMoving() const
+{
+    return GetMovementSpeed() > 10.0f;
+}
+
 float AWoWCharacterBase::GetHealthPercent() const
 {
     UWoWAttributeSet* AttribSet = GetAttributeSet();
