@@ -15,6 +15,16 @@ class UEffectApplicationComponent;
 class UEffectDataAsset;
 class UAbilityDataAsset;
 
+    UENUM(BlueprintType)
+    enum class EMovementStance : uint8
+    {
+        Idle        UMETA(DisplayName = "Idle"),
+        Forward     UMETA(DisplayName = "Forward"),
+        Backward    UMETA(DisplayName = "Backward"),
+        StrafeLeft  UMETA(DisplayName = "Strafe Left"),
+        StrafeRight UMETA(DisplayName = "Strafe Right"),
+    };
+
 UCLASS()
 class MYPROJECT5_API AWoWCharacterBase : public ACharacter, public IAbilitySystemInterface
 {
@@ -65,10 +75,37 @@ bool IsMoving() const;
     UFUNCTION(BlueprintPure, Category = "Effects")
     UEffectDataAsset* GetEffectDataAsset() const { return EffectDataAsset; }
 
+        // Gets the appropriate animation stance based on movement direction
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    EMovementStance GetMovementStance() const;
+    
+    // Enum for animation stances - add to header or make a separate header
+    
+    // Animation references
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation")
+    UAnimSequence* IdleAnimation;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation")
+    UAnimSequence* ForwardAnimation;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation")
+    UAnimSequence* BackwardAnimation;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation")
+    UAnimSequence* StrafeLeftAnimation;
+    
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation")
+    UAnimSequence* StrafeRightAnimation;
+    
+    // Get the current animation to play
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    UAnimSequence* GetCurrentAnimation() const;
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
     
+   EMovementStance DirectionToStance(float Direction) const;
+
     // Effect Application component
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Effects")
     UEffectApplicationComponent* EffectApplicationComponent;

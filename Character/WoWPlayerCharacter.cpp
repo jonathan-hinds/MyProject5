@@ -129,20 +129,25 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 
 void AWoWPlayerCharacter::MoveForward(float Value)
 {
+    // Check for cast interruption first
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
     {
         CastComp->NotifyCastInterrupted();
     }
 
-    if ((Controller != nullptr) && (Value != 0.0f))
+    if (Controller != nullptr && Value != 0.0f)
     {
+        // Find out which way is forward
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
+        
+        // Get forward vector
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         AddMovementInput(Direction, Value);
     }
 }
+
 
 void AWoWPlayerCharacter::OnHotbarSlot1() { HandleHotbarSlot(0); }
 void AWoWPlayerCharacter::OnHotbarSlot2() { HandleHotbarSlot(1); }
@@ -185,16 +190,20 @@ void AWoWPlayerCharacter::Jump()
 
 void AWoWPlayerCharacter::MoveRight(float Value)
 {
+    // Check for cast interruption first
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
     {
         CastComp->NotifyCastInterrupted();
     }
 
-    if ((Controller != nullptr) && (Value != 0.0f))
+    if (Controller != nullptr && Value != 0.0f)
     {
+        // Find out which way is right
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
+        
+        // Get right vector 
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
         AddMovementInput(Direction, Value);
     }
@@ -388,10 +397,21 @@ void AWoWPlayerCharacter::OnRep_PlayerState()
     }
 }
 
+void AWoWPlayerCharacter::UpdateInputVector(float ForwardInput, float RightInput)
+{
+    // Store the input vector for use in UpdateMovementAndRotation
+    CurrentInputVector.X = ForwardInput;
+    CurrentInputVector.Y = RightInput;
+    CurrentInputVector.Z = 0.0f;
+}
+
 void AWoWPlayerCharacter::Tick(float DeltaTime)
 {
- 
+    Super::Tick(DeltaTime);
+    
+    // Update movement and rotation each frame
 }
+
 
 bool AWoWPlayerCharacter::Server_ApplyAbilityEffect_Validate(int32 AbilityID, AActor* Target)
 {

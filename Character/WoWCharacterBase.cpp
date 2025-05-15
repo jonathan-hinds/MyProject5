@@ -116,24 +116,116 @@ void AWoWCharacterBase::ApplyStartupEffects()
 float AWoWCharacterBase::GetMovementDirection() const
 {
     const FVector ForwardVector = GetActorForwardVector();
-    const FVector RightVector = GetActorRightVector();
-    
     const FVector Velocity = GetVelocity();
     
-    if (Velocity.SizeSquared2D() < 1.0f)
+    if (Velocity.SizeSquared2D() < 10.0f)
     {
         return 0.0f;
     }
     
+    // Normalize the velocity vector
     const FVector VelocityNormalized = Velocity.GetSafeNormal2D();
     
-    const float ForwardAmount = FVector::DotProduct(ForwardVector, VelocityNormalized);
-    const float RightAmount = FVector::DotProduct(RightVector, VelocityNormalized);
+    // Calculate the angle between the forward vector and velocity
+    float ForwardDot = FVector::DotProduct(ForwardVector, VelocityNormalized);
     
-    const float AngleRadians = FMath::Atan2(RightAmount, ForwardAmount);
-    const float AngleDegrees = FMath::RadiansToDegrees(AngleRadians);
+    // Calculate the right vector dot product
+    const FVector RightVector = FVector::CrossProduct(FVector::UpVector, ForwardVector);
+    float RightDot = FVector::DotProduct(RightVector, VelocityNormalized);
+    
+    // Calculate the angle in degrees
+    float AngleDegrees = FMath::RadiansToDegrees(FMath::Atan2(RightDot, ForwardDot));
     
     return AngleDegrees;
+}
+
+EMovementStance AWoWCharacterBase::GetMovementStance() const
+{
+    // If not moving, return idle
+    if (!IsMoving())
+    {
+        return EMovementStance::Idle;
+    }
+    
+    // Get the movement direction angle (-180 to 180 degrees)
+    float Direction = GetMovementDirection();
+    
+    // Normalize angle to -180 to 180 range
+    while (Direction > 180.0f) Direction -= 360.0f;
+    while (Direction < -180.0f) Direction += 360.0f;
+    
+    // Simple direction check for the 4 cardinal directions
+    if (Direction >= -45.0f && Direction <= 45.0f)
+    {
+        return EMovementStance::Forward;
+    }
+    else if (Direction >= 45.0f && Direction <= 135.0f)
+    {
+        return EMovementStance::StrafeRight;
+    }
+    else if ((Direction >= 135.0f) || (Direction <= -135.0f))
+    {
+        return EMovementStance::Backward;
+    }
+    else // Between -45 and -135
+    {
+        return EMovementStance::StrafeLeft;
+    }
+}
+
+EMovementStance AWoWCharacterBase::DirectionToStance(float Direction) const
+{
+    // Normalize angle to -180 to 180 range
+    while (Direction > 180.0f) Direction -= 360.0f;
+    while (Direction < -180.0f) Direction += 360.0f;
+    
+    // Forward: -45 to 45 degrees
+    if (Direction >= -45.0f && Direction <= 45.0f)
+    {
+        return EMovementStance::Forward;
+    }
+    // Backward: 135 to 180 or -135 to -180 degrees
+    else if (Direction >= 135.0f || Direction <= -135.0f)
+    {
+        return EMovementStance::Backward;
+    }
+    // Strafe Right: 45 to 135 degrees
+    else if (Direction > 45.0f && Direction < 135.0f)
+    {
+        return EMovementStance::StrafeRight;
+    }
+    // Strafe Left: -45 to -135 degrees
+    else
+    {
+        return EMovementStance::StrafeLeft;
+    }
+}
+
+// Add to WoWCharacterBase.cpp
+UAnimSequence* AWoWCharacterBase::GetCurrentAnimation() const
+{
+    // Get the current movement stance
+    EMovementStance CurrentStance = GetMovementStance();
+    
+    // Return the appropriate animation
+    switch (CurrentStance)
+    {
+        case EMovementStance::Forward:
+            return ForwardAnimation;
+            
+        case EMovementStance::Backward:
+            return BackwardAnimation;
+            
+        case EMovementStance::StrafeLeft:
+            return StrafeLeftAnimation;
+            
+        case EMovementStance::StrafeRight:
+            return StrafeRightAnimation;
+            
+        case EMovementStance::Idle:
+        default:
+            return IdleAnimation;
+    }
 }
 
 float AWoWCharacterBase::GetMovementSpeed() const

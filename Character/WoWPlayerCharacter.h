@@ -47,6 +47,36 @@ public:
     float CameraZoomStep = 50.0f;
 
 protected:
+
+
+    // Direction the character is facing
+    FRotator TargetRotation;
+    
+    // Smooth rotation speed
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float RotationRate = 10.0f;
+    
+    // Current input vector
+    FVector CurrentInputVector;
+    
+    // Track input for movement
+    void UpdateInputVector(float ForwardInput, float RightInput);
+    
+    // Is the character controlled by mouse movement
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bMouseControlsRotation = true;
+    
+    // Toggle mouse rotation
+    UFUNCTION(BlueprintCallable, Category = "Movement")
+    void ToggleMouseRotation() { bMouseControlsRotation = !bMouseControlsRotation; }
+
+
+
+
+
+
+
+
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;
 
