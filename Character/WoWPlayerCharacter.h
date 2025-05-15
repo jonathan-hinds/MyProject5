@@ -45,10 +45,25 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
     float CameraZoomStep = 50.0f;
+    virtual float GetForwardInput() const { return ForwardInputValue; }
+    virtual float GetRightInput() const { return RightInputValue; }
+
+// Add to WoWPlayerCharacter.h in the public section
+public:
+    // Method to update skeletal mesh rotation based on movement direction
+    void UpdateMeshRotation();
+    
+    // Add these properties to allow adjustment in the editor
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    bool bRotateMeshToMatchMovement = true;
+    
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    FRotator MeshBaseRotation = FRotator(0.0f, -90.0f, 0.0f); // Default 90 degrees rotated
 
 protected:
 
-
+    float ForwardInputValue;
+    float RightInputValue;
     // Direction the character is facing
     FRotator TargetRotation;
     

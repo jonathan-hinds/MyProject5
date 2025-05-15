@@ -32,7 +32,8 @@ class MYPROJECT5_API AWoWCharacterBase : public ACharacter, public IAbilitySyste
 
 public:
     AWoWCharacterBase();
-
+    virtual float GetForwardInput() const { return 0.0f; }
+    virtual float GetRightInput() const { return 0.0f; }
 UFUNCTION(BlueprintCallable, Category = "Animation")
 float GetMovementDirection() const;
 
@@ -41,6 +42,9 @@ float GetMovementSpeed() const;
 
 UFUNCTION(BlueprintCallable, Category = "Animation")
 bool IsMoving() const;
+
+
+
 
     // Called every frame
     virtual void Tick(float DeltaTime) override;

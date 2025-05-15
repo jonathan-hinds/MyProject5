@@ -59,6 +59,8 @@ AWoWPlayerCharacter::AWoWPlayerCharacter()
     MinCameraDistance = 150.0f;
     MaxCameraDistance = 800.0f;
     CameraZoomStep = 50.0f;
+        ForwardInputValue = 0.0f;
+    RightInputValue = 0.0f;
 }
 
 void AWoWPlayerCharacter::BeginPlay()
@@ -129,23 +131,25 @@ void AWoWPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 
 void AWoWPlayerCharacter::MoveForward(float Value)
 {
-    // Check for cast interruption first
+    // Keep your existing code
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
     {
         CastComp->NotifyCastInterrupted();
     }
 
+    // Simply store the input value
+    ForwardInputValue = Value;
+
+    // Rest of your existing code remains unchanged
     if (Controller != nullptr && Value != 0.0f)
     {
-        // Find out which way is forward
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
-        
-        // Get forward vector
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         AddMovementInput(Direction, Value);
     }
+    UpdateMeshRotation();
 }
 
 
@@ -190,22 +194,103 @@ void AWoWPlayerCharacter::Jump()
 
 void AWoWPlayerCharacter::MoveRight(float Value)
 {
-    // Check for cast interruption first
+    // Keep your existing code
     UCastingComponent* CastComp = GetCastingComponent();
     if (CastComp && CastComp->IsCasting() && !CastComp->CanCastWhileMoving() && Value != 0.0f)
     {
         CastComp->NotifyCastInterrupted();
     }
 
+    // Simply store the input value
+    RightInputValue = Value;
+
+    // Rest of your existing code remains unchanged
     if (Controller != nullptr && Value != 0.0f)
     {
-        // Find out which way is right
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
-        
-        // Get right vector 
         const FVector Direction = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
         AddMovementInput(Direction, Value);
+    }
+    UpdateMeshRotation();
+}
+
+void AWoWPlayerCharacter::UpdateMeshRotation()
+{
+    // Skip if feature is disabled
+    if (!bRotateMeshToMatchMovement)
+    {
+        return;
+    }
+    
+    // Get the skeletal mesh component
+    USkeletalMeshComponent* SkelMesh = GetMesh();
+    if (!SkelMesh || !Controller)
+    {
+        return;
+    }
+    
+    // Check if we're moving diagonally
+    bool bMovingDiagonally = FMath::Abs(ForwardInputValue) > 0.1f && FMath::Abs(RightInputValue) > 0.1f;
+    
+    // If not moving diagonally, reset to base rotation
+    if (!bMovingDiagonally || (FMath::IsNearlyZero(ForwardInputValue) && FMath::IsNearlyZero(RightInputValue)))
+    {
+        // Reset to the base rotation for cardinal directions
+        SkelMesh->SetRelativeRotation(MeshBaseRotation);
+        return;
+    }
+    
+    // Determine if we're moving backward diagonally
+    bool bMovingBackwardDiagonally = ForwardInputValue < 0.0f && FMath::Abs(RightInputValue) > 0.1f;
+    
+    // For diagonal backward movement, we need special handling
+    if (bMovingBackwardDiagonally)
+    {
+        // For backward diagonal movement, we want to face forward but move backward
+        // So we need to rotate in the opposite direction to the movement
+        
+        // Calculate the angle based on right input (determines left/right direction)
+        float YawOffset = (RightInputValue > 0.0f) ? -45.0f : 45.0f;
+        
+        // Apply the offset to the base rotation
+        FRotator BackwardDiagonalRot = MeshBaseRotation;
+        BackwardDiagonalRot.Yaw += YawOffset;
+        
+        // Apply the new rotation directly
+        SkelMesh->SetRelativeRotation(BackwardDiagonalRot);
+    }
+    else if (bMovingDiagonally)
+    {
+        // For forward diagonal movement, proceed as before
+        // Get the camera's forward and right vectors
+        FRotator CameraRotation = Controller->GetControlRotation();
+        CameraRotation.Pitch = 0.0f;
+        CameraRotation.Roll = 0.0f;
+        
+        FVector ForwardVector = FRotationMatrix(CameraRotation).GetUnitAxis(EAxis::X);
+        FVector RightVector = FRotationMatrix(CameraRotation).GetUnitAxis(EAxis::Y);
+        
+        // Calculate movement direction based on input values
+        FVector MovementDirection = ForwardVector * ForwardInputValue + RightVector * RightInputValue;
+        
+        // Only update if we have a valid direction
+        if (!MovementDirection.IsNearlyZero())
+        {
+            // Calculate world-space rotation for the movement direction
+            FRotator MovementRotation = MovementDirection.ToOrientationRotator();
+            
+            // Calculate the difference between actor forward and movement direction
+            FRotator ActorRot = GetActorRotation();
+            FRotator DeltaRot = MovementRotation - ActorRot;
+            DeltaRot.Normalize();
+            
+            // Apply the base rotation offset plus the delta rotation to align with movement
+            FRotator NewMeshRotation = MeshBaseRotation + DeltaRot;
+            
+            // Apply the new rotation to the mesh
+            SkelMesh->SetRelativeRotation(NewMeshRotation);
+        }
     }
 }
 
@@ -408,7 +493,7 @@ void AWoWPlayerCharacter::UpdateInputVector(float ForwardInput, float RightInput
 void AWoWPlayerCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
+    UpdateMeshRotation();
     // Update movement and rotation each frame
 }
 

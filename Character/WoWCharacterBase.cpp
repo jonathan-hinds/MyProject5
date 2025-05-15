@@ -147,7 +147,40 @@ EMovementStance AWoWCharacterBase::GetMovementStance() const
         return EMovementStance::Idle;
     }
     
-    // Get the movement direction angle (-180 to 180 degrees)
+    // Get input values (will be overridden by player character)
+    float ForwardInput = GetForwardInput();
+    float RightInput = GetRightInput();
+    
+    // For player characters that have input values (non-zero)
+    if (FMath::Abs(ForwardInput) > KINDA_SMALL_NUMBER || FMath::Abs(RightInput) > KINDA_SMALL_NUMBER)
+    {
+        // If there's any forward/backward input, use those animations
+        if (FMath::Abs(ForwardInput) > 0.1f)
+        {
+            if (ForwardInput > 0.0f)
+            {
+                return EMovementStance::Forward;
+            }
+            else
+            {
+                return EMovementStance::Backward;
+            }
+        }
+        // Only use strafe animations when exclusively pressing A or D
+        else if (FMath::Abs(RightInput) > 0.1f)
+        {
+            if (RightInput > 0.0f)
+            {
+                return EMovementStance::StrafeRight;
+            }
+            else
+            {
+                return EMovementStance::StrafeLeft;
+            }
+        }
+    }
+    
+    // For non-player characters or fallback, use the existing direction-based logic
     float Direction = GetMovementDirection();
     
     // Normalize angle to -180 to 180 range
