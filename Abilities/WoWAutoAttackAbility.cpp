@@ -27,6 +27,10 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
                                           const FGameplayAbilityActivationInfo ActivationInfo, 
                                           const FGameplayEventData* TriggerEventData)
 {
+    // Log to verify activation happens only once per request
+    UE_LOG(LogTemp, Warning, TEXT("Auto-attack ability activating - Role: %s"), 
+           ActorInfo->IsLocallyControlled() ? TEXT("Local") : TEXT("Remote"));
+
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
     {
         EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
@@ -56,28 +60,33 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
             GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("Auto-attack stopped"));
         }
         
+        // Find targeting component to clean up state
+        UTargetingComponent* TargetingComp = AvatarActor->FindComponentByClass<UTargetingComponent>();
+        if (TargetingComp)
+        {
+            TargetingComp->StopAutoAttack();
+        }
+        
         EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
         return;
     }
     
-    // Check if we have a valid enemy target before starting
-    AActor* TargetActor = GetCurrentTarget();
-    if (!TargetActor || !CanAttackTarget(TargetActor))
+    // Add the active tag to mark auto-attack as on
+    ASC->AddLooseGameplayTag(AutoAttackTag);
+    
+    // Find targeting component to validate target
+    UTargetingComponent* TargetingComp = AvatarActor->FindComponentByClass<UTargetingComponent>();
+    if (!TargetingComp || !TargetingComp->HasValidTarget())
     {
         if (GEngine)
         {
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("No valid enemy target"));
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("No valid target for auto-attack"));
         }
-        EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+        
+        // Clean up and end
+        ASC->RemoveLooseGameplayTag(AutoAttackTag);
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
         return;
-    }
-    
-    // Start auto-attack - add the active tag
-    ASC->AddLooseGameplayTag(AutoAttackTag);
-    
-    if (GEngine)
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("Auto-attack started"));
     }
     
     // Get the owner's haste multiplier
@@ -94,18 +103,20 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
     // Ensure we don't go below minimum attack speed
     AdjustedAttackSpeed = FMath::Max(AdjustedAttackSpeed, MinAttackSpeed);
     
-    // Log for debugging
     if (GEngine)
     {
         GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, 
-            FString::Printf(TEXT("Attack Speed: %.2fs (Base: %.2fs, Haste: %.2f)"), 
-                           AdjustedAttackSpeed, WeaponBaseSpeed, HasteMultiplier));
+            FString::Printf(TEXT("Attack Speed: %.2fs (Haste: %.2f)"), 
+                           AdjustedAttackSpeed, HasteMultiplier));
     }
     
-    // Perform the first attack immediately
-    PerformAutoAttack();
+    // Perform the first attack immediately, but only on authority
+    if (ActorInfo->IsNetAuthority())
+    {
+        PerformAutoAttack();
+    }
     
-    // Set up timer for subsequent attacks with the adjusted speed
+    // Set up timer for subsequent attacks
     GetWorld()->GetTimerManager().SetTimer(
         AutoAttackTimerHandle,
         this,
@@ -117,13 +128,39 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
 
 void UWoWAutoAttackAbility::PerformAutoAttack()
 {
+    // Add a static counter to track executions
+    static int32 AutoAttackExecutionCount = 0;
+    int32 ThisAttackNumber = ++AutoAttackExecutionCount;
+    
+    // Only perform auto-attack on authority to prevent duplicate damage
+    if (!IsLocallyControlled() && !GetAvatarActorFromActorInfo()->HasAuthority())
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("Auto-attack #%d skipped - not authority"), ThisAttackNumber);
+        return;
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Auto-attack #%d executing on %s"), 
+           ThisAttackNumber, 
+           GetAvatarActorFromActorInfo()->HasAuthority() ? TEXT("server") : TEXT("client"));
+    
     AActor* AvatarActor = GetAvatarActorFromActorInfo();
-    AActor* TargetActor = GetCurrentTarget();
+    
+    // Find targeting component
+    UTargetingComponent* TargetingComp = AvatarActor ? AvatarActor->FindComponentByClass<UTargetingComponent>() : nullptr;
+    if (!TargetingComp)
+    {
+        UE_LOG(LogTemp, Error, TEXT("Auto-attack #%d failed - no targeting component"), ThisAttackNumber);
+        EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, true);
+        return;
+    }
+    
+    // Get current target
+    AActor* TargetActor = TargetingComp->GetCurrentTarget();
     
     // Check if target is still valid and is an enemy
-    if (!AvatarActor || !TargetActor || !IsValid(TargetActor) || !CanAttackTarget(TargetActor))
+    if (!TargetActor || !IsValid(TargetActor) || !CanAttackTarget(TargetActor))
     {
-        // No valid target or target is not an enemy, end auto-attack
+        UE_LOG(LogTemp, Warning, TEXT("Auto-attack #%d ended - no valid target"), ThisAttackNumber);
         EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, true);
         return;
     }
@@ -131,11 +168,7 @@ void UWoWAutoAttackAbility::PerformAutoAttack()
     float DistanceToTarget = FVector::Dist(AvatarActor->GetActorLocation(), TargetActor->GetActorLocation());
     if (DistanceToTarget > AttackRange)
     {
-        // Target out of range - don't end ability, just skip this attack
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Yellow, TEXT("Auto-attack target out of range"));
-        }
+        UE_LOG(LogTemp, Verbose, TEXT("Auto-attack #%d skipped - target out of range"), ThisAttackNumber);
         return;
     }
     
@@ -164,6 +197,7 @@ void UWoWAutoAttackAbility::PerformAutoAttack()
             if (IsCriticalHit)
             {
                 DamageAmount *= 2.0f;
+                
                 if (GEngine)
                 {
                     GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, 
@@ -173,19 +207,44 @@ void UWoWAutoAttackAbility::PerformAutoAttack()
             else if (GEngine)
             {
                 GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::White, 
-                    FString::Printf(TEXT("Hit for %.0f damage"), DamageAmount));
+                    FString::Printf(TEXT("[%d] Hit for %.0f damage"), ThisAttackNumber, DamageAmount));
             }
         }
     }
     
-    // Apply damage
+    // Apply damage - log before and after to track execution flow
+    UE_LOG(LogTemp, Warning, TEXT("Auto-attack #%d applying %.0f damage"), ThisAttackNumber, DamageAmount);
     ApplyDamageToTarget(TargetActor, DamageAmount);
+    UE_LOG(LogTemp, Warning, TEXT("Auto-attack #%d damage application complete"), ThisAttackNumber);
+    
+    // Update targeting component's attack-in-progress state
+    if (TargetingComp)
+    {
+        GetWorld()->GetTimerManager().SetTimerForNextTick([TargetingComp]() {
+            TargetingComp->ClearAttackInProgressFlag();
+        });
+    }
 }
 
 void UWoWAutoAttackAbility::ApplyDamageToTarget(AActor* TargetActor, float DamageAmount)
 {
+    // Add unique ID to track each damage application
+    static int32 DamageApplicationCounter = 0;
+    int32 ThisDamageID = ++DamageApplicationCounter;
+    
+    UE_LOG(LogTemp, Warning, TEXT("Damage Application #%d START - %.0f damage to %s"), 
+           ThisDamageID, DamageAmount, *TargetActor->GetName());
+    
     if (!TargetActor || !DamageEffect)
     {
+        UE_LOG(LogTemp, Error, TEXT("Damage Application #%d FAILED - invalid target or effect"), ThisDamageID);
+        return;
+    }
+    
+    // Final authority check
+    if (!GetAvatarActorFromActorInfo()->HasAuthority())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Damage Application #%d SKIPPED - not server"), ThisDamageID);
         return;
     }
     
@@ -201,6 +260,7 @@ void UWoWAutoAttackAbility::ApplyDamageToTarget(AActor* TargetActor, float Damag
     
     if (!TargetASC)
     {
+        UE_LOG(LogTemp, Error, TEXT("Damage Application #%d FAILED - no target ASC"), ThisDamageID);
         return;
     }
     
@@ -209,7 +269,8 @@ void UWoWAutoAttackAbility::ApplyDamageToTarget(AActor* TargetActor, float Damag
     EffectContext.AddSourceObject(GetAvatarActorFromActorInfo());
     
     // Create effect spec
-    FGameplayEffectSpecHandle SpecHandle = GetAbilitySystemComponentFromActorInfo()->MakeOutgoingSpec(DamageEffect, 1, EffectContext);
+    FGameplayEffectSpecHandle SpecHandle = GetAbilitySystemComponentFromActorInfo()->MakeOutgoingSpec(
+        DamageEffect, 1, EffectContext);
     
     if (SpecHandle.IsValid())
     {
@@ -217,13 +278,38 @@ void UWoWAutoAttackAbility::ApplyDamageToTarget(AActor* TargetActor, float Damag
         FGameplayTag DamageTag = FGameplayTag::RequestGameplayTag(FName("Data.Damage"));
         SpecHandle.Data->SetSetByCallerMagnitude(DamageTag, -DamageAmount);
         
-        // Apply effect to target
-        GetAbilitySystemComponentFromActorInfo()->ApplyGameplayEffectSpecToTarget(*SpecHandle.Data.Get(), TargetASC);
+        UE_LOG(LogTemp, Warning, TEXT("Damage Application #%d applying effect to target"), ThisDamageID);
+        
+        // Apply effect to target and capture result
+        FActiveGameplayEffectHandle ActiveHandle = GetAbilitySystemComponentFromActorInfo()->ApplyGameplayEffectSpecToTarget(
+            *SpecHandle.Data.Get(), TargetASC);
+            
+        if (ActiveHandle.IsValid())
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Damage Application #%d SUCCESS"), ThisDamageID);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Damage Application #%d FAILED - effect not applied"), ThisDamageID);
+        }
     }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("Damage Application #%d FAILED - invalid effect spec"), ThisDamageID);
+    }
+    
+    UE_LOG(LogTemp, Warning, TEXT("Damage Application #%d COMPLETE"), ThisDamageID);
 }
 
-void UWoWAutoAttackAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
+void UWoWAutoAttackAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, 
+                                    const FGameplayAbilityActorInfo* ActorInfo, 
+                                    const FGameplayAbilityActivationInfo ActivationInfo, 
+                                    bool bReplicateEndAbility, 
+                                    bool bWasCancelled)
 {
+    UE_LOG(LogTemp, Warning, TEXT("Auto-attack ability ending - Was Cancelled: %s"), 
+           bWasCancelled ? TEXT("Yes") : TEXT("No"));
+    
     // Clear the timer
     GetWorld()->GetTimerManager().ClearTimer(AutoAttackTimerHandle);
     
@@ -234,7 +320,27 @@ void UWoWAutoAttackAbility::EndAbility(const FGameplayAbilitySpecHandle Handle, 
         ASC->RemoveLooseGameplayTag(FGameplayTag::RequestGameplayTag(FName("Ability.AutoAttack.Active")));
     }
     
+    // Find and update targeting component
+    AActor* AvatarActor = ActorInfo->AvatarActor.Get();
+    if (AvatarActor)
+    {
+        UTargetingComponent* TargetingComp = AvatarActor->FindComponentByClass<UTargetingComponent>();
+        if (TargetingComp)
+        {
+            // Ensure attack-in-progress flag is cleared
+            TargetingComp->ClearAttackInProgressFlag();
+            
+            // If the ability was cancelled, also update auto-attack state
+            if (bWasCancelled)
+            {
+                TargetingComp->StopAutoAttack();
+            }
+        }
+    }
+    
     Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+    
+    UE_LOG(LogTemp, Warning, TEXT("Auto-attack ability ended"));
 }
 
 AActor* UWoWAutoAttackAbility::GetCurrentTarget() const

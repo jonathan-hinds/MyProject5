@@ -147,7 +147,7 @@ void UTargetingComponent::HandleTargetSelection()
 void UTargetingComponent::HandleAutoAttack()
 {
     // Check if we should be auto-attacking
-    if (!bIsAutoAttacking || !HasValidTarget() || bIsAttackInProgress)
+    if (!bIsAutoAttacking || !HasValidTarget())
     {
         return;
     }
@@ -161,20 +161,36 @@ void UTargetingComponent::HandleAutoAttack()
         return;
     }
     
-    // Check if we have a timer running
-    if (GetWorld()->GetTimerManager().IsTimerActive(AutoAttackTimerHandle))
+    // Check if attack is already in progress
+    if (bIsAttackInProgress)
     {
         return;
     }
     
-    // Mark attack as in progress to prevent multiple simultaneous activations
-    bIsAttackInProgress = true;
-    
-    // Calculate distance to target
+    // Get the ability system component
     AActor* Owner = GetOwner();
     if (!Owner)
     {
-        bIsAttackInProgress = false;
+        return;
+    }
+    
+    IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Owner);
+    if (!ASCInterface)
+    {
+        return;
+    }
+    
+    UAbilitySystemComponent* AbilitySystemComponent = ASCInterface->GetAbilitySystemComponent();
+    if (!AbilitySystemComponent)
+    {
+        return;
+    }
+    
+    // Check if auto-attack ability is already active via tag
+    FGameplayTag AutoAttackTag = FGameplayTag::RequestGameplayTag(FName("Ability.AutoAttack.Active"));
+    if (AbilitySystemComponent->HasMatchingGameplayTag(AutoAttackTag))
+    {
+        // Auto-attack already running, don't activate again
         return;
     }
     
@@ -182,73 +198,31 @@ void UTargetingComponent::HandleAutoAttack()
     float DistanceToTarget = FVector::Dist(Owner->GetActorLocation(), CurrentTarget->GetActorLocation());
     
     // If we're too far away, don't perform the attack but keep auto-attack enabled
-    // Just set a shorter timer to check again soon
     if (DistanceToTarget > MeleeAttackRange)
     {
         // Set a short timer to check again
         GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, 0.5f, false);
-        
-        // Clear attack-in-progress state
-        bIsAttackInProgress = false;
-        
-        // Optional: Display a "Too far away" message if you want visual feedback
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Yellow, TEXT("Auto-attack active - target out of range"));
-        }
         return;
     }
     
-    // Get the ability system component
-    IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Owner);
-    if (!ASCInterface)
-    {
-        bIsAttackInProgress = false;
-        return;
-    }
-    
-    UAbilitySystemComponent* AbilitySystemComponent = ASCInterface->GetAbilitySystemComponent();
-    if (!AbilitySystemComponent)
-    {
-        bIsAttackInProgress = false;
-        return;
-    }
-    
-    // Get the owner's haste multiplier
-    float HasteMultiplier = 1.0f;
-    AWoWCharacterBase* OwnerChar = Cast<AWoWCharacterBase>(Owner);
-    if (OwnerChar)
-    {
-        HasteMultiplier = OwnerChar->GetHasteMultiplier();
-    }
-    
-    // Apply the haste multiplier to the weapon base speed
-    float AdjustedAttackDelay = WeaponBaseSpeed * HasteMultiplier;
-    
-    // Ensure we don't go below minimum attack speed
-    AdjustedAttackDelay = FMath::Max(AdjustedAttackDelay, MinAttackSpeed);
+    // Mark attack as in progress
+    bIsAttackInProgress = true;
     
     // Activate the auto attack ability
     FGameplayTagContainer AbilityTagContainer;
     AbilityTagContainer.AddTag(FGameplayTag::RequestGameplayTag(FName(AutoAttackAbilityTag)));
     
-    // Activate an ability with the matching tags
+    // Activate the ability - this happens only once per auto-attack cycle
     AbilitySystemComponent->TryActivateAbilitiesByTag(AbilityTagContainer);
-    
-    // Set timer for next attack using adjusted delay
-    GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, AdjustedAttackDelay, false);
-    
-    // Set a timer to clear the attack-in-progress flag using a lambda instead
-    FTimerDelegate ClearAttackFlagDelegate;
-    ClearAttackFlagDelegate.BindLambda([this]() {
-        this->bIsAttackInProgress = false;
-    });
-    GetWorld()->GetTimerManager().SetTimer(ClearAttackFlagHandle, ClearAttackFlagDelegate, 0.2f, false);
 }
 
 void UTargetingComponent::ClearAttackInProgressFlag()
 {
-    bIsAttackInProgress = false;
+    if (GetOwnerRole() == ROLE_Authority)
+    {
+        bIsAttackInProgress = false;
+        UE_LOG(LogTemp, Verbose, TEXT("Attack-in-progress flag cleared"));
+    }
 }
 
 void UTargetingComponent::SetTarget(AActor* NewTarget)
