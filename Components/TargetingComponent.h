@@ -85,6 +85,18 @@ float MinAttackSpeed;
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_StopAutoAttack();
 
+// Is an attack currently in progress
+UPROPERTY(Replicated)
+bool bIsAttackInProgress;
+
+// Timer handle for clearing attack-in-progress state
+FTimerHandle ClearAttackFlagHandle;
+
+// Helper function to clear the attack-in-progress flag
+void ClearAttackInProgressFlag();
+
+
+
 protected:
     virtual void BeginPlay() override;
 

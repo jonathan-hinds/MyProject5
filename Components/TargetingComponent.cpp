@@ -20,6 +20,7 @@ UTargetingComponent::UTargetingComponent()
     MinAttackSpeed = 1.5f;    // Minimum 1.5 second attack speed
     AutoAttackAbilityTag = "Ability.Attack.Melee";
     bIsAutoAttacking = false;
+    bIsAttackInProgress = false;
     MeleeAttackRange = 200.0f;
 }
 
@@ -34,6 +35,7 @@ void UTargetingComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
     
     DOREPLIFETIME(UTargetingComponent, CurrentTarget);
     DOREPLIFETIME(UTargetingComponent, bIsAutoAttacking);
+    DOREPLIFETIME(UTargetingComponent, bIsAttackInProgress);
 }
 
 void UTargetingComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -145,7 +147,7 @@ void UTargetingComponent::HandleTargetSelection()
 void UTargetingComponent::HandleAutoAttack()
 {
     // Check if we should be auto-attacking
-    if (!bIsAutoAttacking || !HasValidTarget())
+    if (!bIsAutoAttacking || !HasValidTarget() || bIsAttackInProgress)
     {
         return;
     }
@@ -165,10 +167,14 @@ void UTargetingComponent::HandleAutoAttack()
         return;
     }
     
+    // Mark attack as in progress to prevent multiple simultaneous activations
+    bIsAttackInProgress = true;
+    
     // Calculate distance to target
     AActor* Owner = GetOwner();
     if (!Owner)
     {
+        bIsAttackInProgress = false;
         return;
     }
     
@@ -182,6 +188,9 @@ void UTargetingComponent::HandleAutoAttack()
         // Set a short timer to check again
         GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, 0.5f, false);
         
+        // Clear attack-in-progress state
+        bIsAttackInProgress = false;
+        
         // Optional: Display a "Too far away" message if you want visual feedback
         if (GEngine)
         {
@@ -194,12 +203,14 @@ void UTargetingComponent::HandleAutoAttack()
     IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Owner);
     if (!ASCInterface)
     {
+        bIsAttackInProgress = false;
         return;
     }
     
     UAbilitySystemComponent* AbilitySystemComponent = ASCInterface->GetAbilitySystemComponent();
     if (!AbilitySystemComponent)
     {
+        bIsAttackInProgress = false;
         return;
     }
     
@@ -226,6 +237,18 @@ void UTargetingComponent::HandleAutoAttack()
     
     // Set timer for next attack using adjusted delay
     GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, AdjustedAttackDelay, false);
+    
+    // Set a timer to clear the attack-in-progress flag using a lambda instead
+    FTimerDelegate ClearAttackFlagDelegate;
+    ClearAttackFlagDelegate.BindLambda([this]() {
+        this->bIsAttackInProgress = false;
+    });
+    GetWorld()->GetTimerManager().SetTimer(ClearAttackFlagHandle, ClearAttackFlagDelegate, 0.2f, false);
+}
+
+void UTargetingComponent::ClearAttackInProgressFlag()
+{
+    bIsAttackInProgress = false;
 }
 
 void UTargetingComponent::SetTarget(AActor* NewTarget)
@@ -398,6 +421,12 @@ void UTargetingComponent::StartAutoAttack()
         return;
     }
     
+    // Avoid redundant toggling if already auto-attacking
+    if (bIsAutoAttacking)
+    {
+        return;
+    }
+    
     // If we're not the server, send RPC to server
     if (GetOwnerRole() < ROLE_Authority)
     {
@@ -409,8 +438,7 @@ void UTargetingComponent::StartAutoAttack()
         bIsAutoAttacking = true;
     }
     
-    // Reset timer to start checking immediately - this is fine to do locally
-    GetWorld()->GetTimerManager().ClearTimer(AutoAttackTimerHandle);
+    // Don't clear timer here - let HandleAutoAttack manage timing
     
     // Optional: Display a message that auto-attack is active
     if (GEngine)
@@ -426,11 +454,24 @@ bool UTargetingComponent::Server_StartAutoAttack_Validate()
 
 void UTargetingComponent::Server_StartAutoAttack_Implementation()
 {
+    // Check if we're already auto-attacking
+    if (bIsAutoAttacking)
+    {
+        // Already auto-attacking - don't set again to avoid toggling
+        return;
+    }
+    
     bIsAutoAttacking = true;
 }
 
 void UTargetingComponent::StopAutoAttack()
 {
+    // If already not auto-attacking, skip
+    if (!bIsAutoAttacking)
+    {
+        return;
+    }
+    
     // If we're not the server, send RPC to server
     if (GetOwnerRole() < ROLE_Authority)
     {
@@ -442,8 +483,18 @@ void UTargetingComponent::StopAutoAttack()
         bIsAutoAttacking = false;
     }
     
-    // Clear timer locally regardless
+    // Clear timers
     GetWorld()->GetTimerManager().ClearTimer(AutoAttackTimerHandle);
+    GetWorld()->GetTimerManager().ClearTimer(ClearAttackFlagHandle);
+    
+    // Reset the attack-in-progress flag
+    bIsAttackInProgress = false;
+    
+    // Optional: Display message
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("Auto-attack stopped"));
+    }
 }
 
 bool UTargetingComponent::Server_StopAutoAttack_Validate()
@@ -453,5 +504,9 @@ bool UTargetingComponent::Server_StopAutoAttack_Validate()
 
 void UTargetingComponent::Server_StopAutoAttack_Implementation()
 {
-    bIsAutoAttacking = false;
+    // Only change state if currently auto-attacking
+    if (bIsAutoAttacking)
+    {
+        bIsAutoAttacking = false;
+    }
 }

@@ -42,13 +42,14 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
     
     // Check if auto-attack is already active
     UAbilitySystemComponent* ASC = ActorInfo->AbilitySystemComponent.Get();
-    if (ASC && ASC->HasMatchingGameplayTag(FGameplayTag::RequestGameplayTag(FName("Ability.AutoAttack.Active"))))
+    FGameplayTag AutoAttackTag = FGameplayTag::RequestGameplayTag(FName("Ability.AutoAttack.Active"));
+    
+    // If we already have the tag, we're toggling OFF
+    if (ASC && ASC->HasMatchingGameplayTag(AutoAttackTag))
     {
-        // Already auto-attacking, toggle off
+        // Stop auto-attack
         GetWorld()->GetTimerManager().ClearTimer(AutoAttackTimerHandle);
-        
-        // Remove the active tag
-        ASC->RemoveLooseGameplayTag(FGameplayTag::RequestGameplayTag(FName("Ability.AutoAttack.Active")));
+        ASC->RemoveLooseGameplayTag(AutoAttackTag);
         
         if (GEngine)
         {
@@ -71,8 +72,8 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
         return;
     }
     
-    // Start auto-attack
-    ASC->AddLooseGameplayTag(FGameplayTag::RequestGameplayTag(FName("Ability.AutoAttack.Active")));
+    // Start auto-attack - add the active tag
+    ASC->AddLooseGameplayTag(AutoAttackTag);
     
     if (GEngine)
     {
