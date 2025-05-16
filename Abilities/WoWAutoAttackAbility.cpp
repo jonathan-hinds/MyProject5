@@ -14,14 +14,18 @@ UWoWAutoAttackAbility::UWoWAutoAttackAbility()
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
     
     AttackRange = 200.0f;
-    AttackSpeed = 1.5f; // Aligned with GCD
+    WeaponBaseSpeed = 10.0f;  // Base weapon speed is 10 seconds (for 1 agility)
+    MinAttackSpeed = 1.5f;    // Minimum attack speed with maximum haste
     
     // Set tags
     AbilityTags.AddTag(FGameplayTag::RequestGameplayTag(FName("Ability.Attack.Melee")));
     ActivationOwnedTags.AddTag(FGameplayTag::RequestGameplayTag(FName("Ability.Attack.Melee")));
 }
 
-void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData)
+void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Handle, 
+                                          const FGameplayAbilityActorInfo* ActorInfo, 
+                                          const FGameplayAbilityActivationInfo ActivationInfo, 
+                                          const FGameplayEventData* TriggerEventData)
 {
     if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
     {
@@ -75,15 +79,37 @@ void UWoWAutoAttackAbility::ActivateAbility(const FGameplayAbilitySpecHandle Han
         GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("Auto-attack started"));
     }
     
+    // Get the owner's haste multiplier
+    float HasteMultiplier = 1.0f;
+    AWoWCharacterBase* OwnerCharacter = Cast<AWoWCharacterBase>(AvatarActor);
+    if (OwnerCharacter)
+    {
+        HasteMultiplier = OwnerCharacter->GetHasteMultiplier();
+    }
+    
+    // Apply the haste multiplier to the base weapon speed
+    float AdjustedAttackSpeed = WeaponBaseSpeed * HasteMultiplier;
+    
+    // Ensure we don't go below minimum attack speed
+    AdjustedAttackSpeed = FMath::Max(AdjustedAttackSpeed, MinAttackSpeed);
+    
+    // Log for debugging
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Cyan, 
+            FString::Printf(TEXT("Attack Speed: %.2fs (Base: %.2fs, Haste: %.2f)"), 
+                           AdjustedAttackSpeed, WeaponBaseSpeed, HasteMultiplier));
+    }
+    
     // Perform the first attack immediately
     PerformAutoAttack();
     
-    // Set up timer for subsequent attacks
+    // Set up timer for subsequent attacks with the adjusted speed
     GetWorld()->GetTimerManager().SetTimer(
         AutoAttackTimerHandle,
         this,
         &UWoWAutoAttackAbility::PerformAutoAttack,
-        AttackSpeed,
+        AdjustedAttackSpeed,
         true // Loop
     );
 }

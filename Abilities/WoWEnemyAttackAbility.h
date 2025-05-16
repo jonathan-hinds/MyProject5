@@ -17,7 +17,13 @@ public:
     
     // Called when the ability ends
     virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
+// Base weapon attack speed
+UPROPERTY(EditDefaultsOnly, Category = "Attack")
+float WeaponBaseSpeed;
 
+// Minimum attack speed with maximum haste
+UPROPERTY(EditDefaultsOnly, Category = "Attack")
+float MinAttackSpeed;
 protected:
     // The range of the attack
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Attack")

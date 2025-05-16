@@ -58,6 +58,15 @@ EBTNodeResult::Type UBTTask_PerformAttack::ExecuteTask(UBehaviorTreeComponent& O
         return EBTNodeResult::Failed;
     }
     
+    // Check for cooldown tag to avoid attacking too quickly
+    FGameplayTag CooldownTag = FGameplayTag::RequestGameplayTag(FName("Enemy.Attack.Cooldown"));
+    if (AbilitySystemComp->HasMatchingGameplayTag(CooldownTag))
+    {
+        // Enemy is on cooldown, can't attack yet
+        UE_LOG(LogTemp, Warning, TEXT("Enemy attack on cooldown"));
+        return EBTNodeResult::Failed;
+    }
+    
     // Get target ASC - this handles both enemy and player targets
     UAbilitySystemComponent* TargetASC = nullptr;
     if (TargetActor->IsA(AWoWPlayerCharacter::StaticClass()))
@@ -86,12 +95,6 @@ EBTNodeResult::Type UBTTask_PerformAttack::ExecuteTask(UBehaviorTreeComponent& O
         TargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(TargetActor);
         UE_LOG(LogTemp, Warning, TEXT("Target is not a player, getting ASC directly: %s"), 
             TargetASC ? TEXT("Success") : TEXT("Failed"));
-    }
-    
-    if (!TargetASC)
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to get Target AbilitySystemComponent"));
-        // Continue anyway, as the ability itself will handle target finding
     }
     
     if (!AttackAbility.Get())
@@ -131,6 +134,58 @@ EBTNodeResult::Type UBTTask_PerformAttack::ExecuteTask(UBehaviorTreeComponent& O
         if (AbilitySystemComp->TryActivateAbility(AbilitySpec->Handle))
         {
             UE_LOG(LogTemp, Warning, TEXT("Successfully activated ability"));
+            
+            // Calculate attack delay based on haste
+            float HasteMultiplier = EnemyCharacter->GetHasteMultiplier();
+            float BaseAttackSpeed = 10.0f;  // Base 10 second attack speed
+            float MinAttackSpeed = 1.5f;    // Minimum attack speed
+            
+            // Apply the haste multiplier to the weapon base speed
+            float AdjustedAttackDelay = BaseAttackSpeed * HasteMultiplier;
+            
+            // Ensure we don't go below minimum attack speed
+            AdjustedAttackDelay = FMath::Max(AdjustedAttackDelay, MinAttackSpeed);
+            
+            // Add cooldown tag
+            FGameplayTagContainer CooldownTags;
+            CooldownTags.AddTag(CooldownTag);
+            AbilitySystemComp->AddLooseGameplayTags(CooldownTags);
+            
+            // Set up a timer to remove the cooldown tag
+            FTimerHandle CooldownTimerHandle;
+            FTimerDelegate TimerDelegate;
+            
+            // Use weak pointer to avoid memory issues if enemy is destroyed
+            TWeakObjectPtr<UAbilitySystemComponent> WeakASC = AbilitySystemComp;
+            
+            TimerDelegate.BindLambda([WeakASC, CooldownTag]()
+            {
+                if (WeakASC.IsValid())
+                {
+                    // Remove the tag when cooldown expires
+                    FGameplayTagContainer TagsToRemove;
+                    TagsToRemove.AddTag(CooldownTag);
+                    WeakASC->RemoveLooseGameplayTags(TagsToRemove);
+                }
+            });
+            
+            // Start the timer with the adjusted attack delay
+            AIController->GetWorld()->GetTimerManager().SetTimer(
+                CooldownTimerHandle, 
+                TimerDelegate, 
+                AdjustedAttackDelay, 
+                false
+            );
+            
+            // Log the attack delay
+            UE_LOG(LogTemp, Warning, TEXT("Enemy attack cooldown: %.2f seconds"), AdjustedAttackDelay);
+            
+            if (GEngine)
+            {
+                GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Red, 
+                    FString::Printf(TEXT("Enemy attack speed: %.2fs"), AdjustedAttackDelay));
+            }
+            
             UE_LOG(LogTemp, Warning, TEXT("==== PERFORM ATTACK TASK SUCCEEDED ===="));
             return EBTNodeResult::Succeeded;
         }

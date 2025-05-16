@@ -206,6 +206,45 @@ EMovementStance AWoWCharacterBase::GetMovementStance() const
     }
 }
 
+float AWoWCharacterBase::GetHasteMultiplier() const
+{
+    UWoWAttributeSet* AttribSet = GetAttributeSet();
+    if (!AttribSet)
+    {
+        return 1.0f; // No haste effect if no attribute set
+    }
+    
+    // Get current agility
+    float CurrentAgility = AttribSet->GetAgility();
+    
+    // Ensure we have at least 1 agility to avoid division by zero
+    CurrentAgility = FMath::Max(1.0f, CurrentAgility);
+    
+    // Formula: BaseSpeed * (1 - log(Agility)/C)
+    // Where:
+    // - At 1 agility: multiplier = 1.0 (no change from base speed)
+    // - At 10 agility: multiplier ≈ 0.6 (60% of base speed, or about 6 seconds)
+    // - At very high agility: approaches minimum speed
+    
+    // Calculate the haste multiplier using logarithmic scaling
+    // The constant C controls how quickly attack speed improves with agility
+    float C = 6.5f;
+    
+    // Calculate logarithmic scaling factor
+    float LogFactor = FMath::Loge(CurrentAgility) / C;
+    
+    // Clamp to ensure the multiplier doesn't go below 0.15 (15% of base)
+    LogFactor = FMath::Min(LogFactor, 0.85f);
+    
+    // Calculate final multiplier (lower = faster attacks)
+    float HasteMultiplier = 1.0f - LogFactor;
+    
+    // Calculate minimum multiplier based on MinAttackSpeed/WeaponBaseSpeed
+    // but this will be applied in the ability itself
+    
+    return HasteMultiplier;
+}
+
 EMovementStance AWoWCharacterBase::DirectionToStance(float Direction) const
 {
     // Normalize angle to -180 to 180 range

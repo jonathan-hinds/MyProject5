@@ -15,7 +15,8 @@ UWoWEnemyAttackAbility::UWoWEnemyAttackAbility()
     // Default values
     AttackRange = 150.0f;
     DamageCoefficient = 1.0f;
-    CooldownDuration = 2.0f;
+    WeaponBaseSpeed = 10.0f;  // Base weapon speed is 10 seconds (for 1 agility)
+    MinAttackSpeed = 1.5f;    // Minimum attack speed with maximum haste
     
     // Set instant cast policy
     InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;

@@ -104,6 +104,10 @@ bool IsMoving() const;
     // Get the current animation to play
     UFUNCTION(BlueprintCallable, Category = "Animation")
     UAnimSequence* GetCurrentAnimation() const;
+    
+UFUNCTION(BlueprintPure, Category = "Combat")
+float GetHasteMultiplier() const;
+
 protected:
     // Called when the game starts or when spawned
     virtual void BeginPlay() override;

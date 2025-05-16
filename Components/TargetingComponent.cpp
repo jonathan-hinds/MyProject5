@@ -16,10 +16,11 @@ UTargetingComponent::UTargetingComponent()
     PrimaryComponentTick.bCanEverTick = true;
     SetIsReplicatedByDefault(true);
     
-    AutoAttackDelay = 2.0f;
+    WeaponBaseSpeed = 10.0f;  // Base 10 second attack speed (at 1 agility)
+    MinAttackSpeed = 1.5f;    // Minimum 1.5 second attack speed
     AutoAttackAbilityTag = "Ability.Attack.Melee";
     bIsAutoAttacking = false;
-    MeleeAttackRange = 200.0f; // Set this to your desired melee range in Unreal units
+    MeleeAttackRange = 200.0f;
 }
 
 void UTargetingComponent::BeginPlay()
@@ -202,6 +203,20 @@ void UTargetingComponent::HandleAutoAttack()
         return;
     }
     
+    // Get the owner's haste multiplier
+    float HasteMultiplier = 1.0f;
+    AWoWCharacterBase* OwnerChar = Cast<AWoWCharacterBase>(Owner);
+    if (OwnerChar)
+    {
+        HasteMultiplier = OwnerChar->GetHasteMultiplier();
+    }
+    
+    // Apply the haste multiplier to the weapon base speed
+    float AdjustedAttackDelay = WeaponBaseSpeed * HasteMultiplier;
+    
+    // Ensure we don't go below minimum attack speed
+    AdjustedAttackDelay = FMath::Max(AdjustedAttackDelay, MinAttackSpeed);
+    
     // Activate the auto attack ability
     FGameplayTagContainer AbilityTagContainer;
     AbilityTagContainer.AddTag(FGameplayTag::RequestGameplayTag(FName(AutoAttackAbilityTag)));
@@ -209,8 +224,8 @@ void UTargetingComponent::HandleAutoAttack()
     // Activate an ability with the matching tags
     AbilitySystemComponent->TryActivateAbilitiesByTag(AbilityTagContainer);
     
-    // Set timer for next attack
-    GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, AutoAttackDelay, false);
+    // Set timer for next attack using adjusted delay
+    GetWorld()->GetTimerManager().SetTimer(AutoAttackTimerHandle, AdjustedAttackDelay, false);
 }
 
 void UTargetingComponent::SetTarget(AActor* NewTarget)

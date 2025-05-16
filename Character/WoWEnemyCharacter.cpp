@@ -168,13 +168,21 @@ void AWoWEnemyCharacter::InitializeEnemy()
                 // Update derived attributes (health, mana, etc.)
                 WoWAS->UpdateDerivedAttributes(AbilitySystemComponent);
                 
+                // Calculate and log the enemy's attack speed
+                float HasteMultiplier = GetHasteMultiplier();
+                float BaseAttackSpeed = 10.0f;
+                float AdjustedSpeed = BaseAttackSpeed * HasteMultiplier;
+                
+                UE_LOG(LogTemp, Warning, TEXT("Enemy %s - Agility: %.1f, Attack Speed: %.2f seconds"), 
+                    *GetName(), WoWAS->GetAgility(), AdjustedSpeed);
+                
                 UE_LOG(LogTemp, Warning, TEXT("Enemy %s stats: STR=%.1f, AGI=%.1f, INT=%.1f, STA=%.1f, SPI=%.1f"), 
-                       *GetName(), WoWAS->GetStrength(), WoWAS->GetAgility(), WoWAS->GetIntellect(), 
-                       WoWAS->GetStamina(), WoWAS->GetSpirit());
+                    *GetName(), WoWAS->GetStrength(), WoWAS->GetAgility(), WoWAS->GetIntellect(), 
+                    WoWAS->GetStamina(), WoWAS->GetSpirit());
                 
                 UE_LOG(LogTemp, Warning, TEXT("Enemy %s vitals: Health=%.1f/%.1f, Mana=%.1f/%.1f"), 
-                       *GetName(), WoWAS->GetHealth(), WoWAS->GetMaxHealth(), 
-                       WoWAS->GetMana(), WoWAS->GetMaxMana());
+                    *GetName(), WoWAS->GetHealth(), WoWAS->GetMaxHealth(), 
+                    WoWAS->GetMana(), WoWAS->GetMaxMana());
             }
             else
             {

@@ -15,6 +15,13 @@ class MYPROJECT5_API UTargetingComponent : public UActorComponent
 public:    
     UTargetingComponent();
 
+    UPROPERTY(EditDefaultsOnly, Category = "Combat")
+float WeaponBaseSpeed;
+
+// Minimum attack speed
+UPROPERTY(EditDefaultsOnly, Category = "Combat")
+float MinAttackSpeed;
+
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
     
     // Set current target

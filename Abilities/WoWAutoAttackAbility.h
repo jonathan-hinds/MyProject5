@@ -33,6 +33,14 @@ protected:
     // Attack speed (aligned with GCD)
     UPROPERTY(EditDefaultsOnly, Category = "Attack")
     float AttackSpeed;
+
+// Base weapon attack speed
+UPROPERTY(EditDefaultsOnly, Category = "Attack")
+float WeaponBaseSpeed;
+
+// Minimum attack speed with maximum haste
+UPROPERTY(EditDefaultsOnly, Category = "Attack")
+float MinAttackSpeed;
     
     // Timer handle for continuous auto-attack
     FTimerHandle AutoAttackTimerHandle;
